@@ -30,6 +30,10 @@
 <input id="quiet-days" name="quiet_days" value="{{.QuietDays}}" inputmode="numeric" aria-describedby="quiet-days-help">
 {{with .Errors.quiet_days}}<p class="error">{{.}}</p>{{end}}
 </div>
+<div class="field">
+<label class="check"><input type="checkbox" name="visitors"{{if .Visitors}} checked{{end}} aria-describedby="visitors-help"> Public search page</label>
+<p class="help" id="visitors-help">Lets anyone look up a pubkey's relay list on the home page, and shows the most listed relays. When it is off, the relay, NIP-11 and this admin keep working.</p>
+</div>
 <button class="primary">Save settings</button>
 </form>
 

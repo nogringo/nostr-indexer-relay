@@ -418,4 +418,126 @@ textarea {
   .bar form {
     margin-left: 0;
   }
+
+  td.url {
+    min-width: 10rem;
+  }
+}
+
+body.public main {
+  max-width: 880px;
+}
+
+h3 {
+  font-size: 0.95rem;
+  font-weight: 650;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.lookup {
+  margin: clamp(1.5rem, 8vh, 5rem) 0 1rem;
+}
+
+.lookup h1 {
+  max-width: 18ch;
+  font-size: clamp(2rem, 6vw, 3.25rem);
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.lookup .lede {
+  margin-bottom: 1.5rem;
+}
+
+.search {
+  display: flex;
+  gap: 0.5rem;
+  max-width: 40rem;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.75rem 0.9rem;
+  font-size: 1.1rem;
+}
+
+.search.compact {
+  margin-bottom: 0.25rem;
+}
+
+.search.compact input {
+  padding: 0.5rem 0.7rem;
+  font-size: 1rem;
+}
+
+.search.compact button {
+  font-size: 0.95rem;
+  padding: 0.5rem 0.9rem;
+}
+
+.search-status {
+  min-height: 1.5em;
+  margin: 0.5rem 0 0;
+  color: var(--ink-muted);
+}
+
+.search-status.error {
+  color: var(--bad);
+}
+
+.copy {
+  display: flex;
+  gap: 0.5rem;
+  max-width: 34rem;
+}
+
+.copy input {
+  flex: 1;
+  min-width: 0;
+}
+
+.copy button {
+  font-size: 0.95rem;
+  padding: 0.45rem 0.9rem;
+}
+
+.pubkey {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.pubkey + .muted {
+  margin: 0.15rem 0 1.25rem;
+}
+
+.table-scroll + .note {
+  margin-top: 0.75rem;
+}
+
+table.list td:not(.url) {
+  width: 5rem;
+  color: var(--good);
+  font-weight: 600;
+}
+
+.event {
+  overflow-x: auto;
+  margin: 0.5rem 0 0;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.field label.check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.field label.check input {
+  width: auto;
 }

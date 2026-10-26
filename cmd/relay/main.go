@@ -51,7 +51,7 @@ func run() error {
 	relay.OnEventSaved = func(context.Context, nostr.Event) { relays.CountStored(time.Now()) }
 	crawl := crawler.New(store, relay, relays, log.New(os.Stderr, "[crawler] ", log.LstdFlags))
 
-	admin := web.New(web.Config{
+	site := web.New(web.Config{
 		Name:            cfg.Name,
 		PublicURL:       cfg.RelayURL,
 		Store:           store,
@@ -60,8 +60,8 @@ func run() error {
 		SettingsChanged: crawl.Rediscover,
 		Log:             log.New(os.Stderr, "[admin] ", log.LstdFlags),
 	})
-	admin.Register(relay.Router())
-	if link, ok := admin.SetupLink(web.BaseURL(cfg.RelayURL, cfg.Addr)); ok {
+	site.Register(relay.Router())
+	if link, ok := site.SetupLink(web.BaseURL(cfg.RelayURL, cfg.Addr)); ok {
 		log.Printf("no admin yet: open %s and sign to become the admin", link)
 	}
 

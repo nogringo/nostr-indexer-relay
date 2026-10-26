@@ -28,6 +28,8 @@ type Settings struct {
 	IndexerShare float64 `json:"indexer_share"`
 	// A non-indexer that brings no list the indexers miss for this long loses its live subscription.
 	LiveQuietPeriod time.Duration `json:"live_quiet_period"`
+	// Whether the public search page is served.
+	Visitors bool `json:"visitors"`
 }
 
 func DefaultSettings() Settings {
@@ -36,6 +38,7 @@ func DefaultSettings() Settings {
 		LiveCap:         50,
 		IndexerShare:    0.5,
 		LiveQuietPeriod: 7 * 24 * time.Hour,
+		Visitors:        true,
 	}
 }
 

@@ -2,7 +2,7 @@
 
 Turnkey Nostr indexer relay. It stores NIP-65 relay lists (kind 10002) only, and fills itself by crawling the network over NIP-77.
 
-Status: early. The relay accepts and serves kind 10002. The crawler discovers relays from the stored lists, tests their NIP-77 support and syncs from the ones that pass. It detects the indexers and follows them live, along with the relays that bring lists the indexers miss. An admin interface at `/admin` shows the crawl and holds the settings. The public search page is not written yet. See [SPEC.md](SPEC.md) for the full design.
+Status: early. The relay accepts and serves kind 10002. The crawler discovers relays from the stored lists, tests their NIP-77 support and syncs from the ones that pass. It detects the indexers and follows them live, along with the relays that bring lists the indexers miss. A public page at `/` looks up any pubkey's relay list, and an admin interface at `/admin` shows the crawl and holds the settings. See [SPEC.md](SPEC.md) for the full design.
 
 Supported NIPs: 1, 11, 40, 42, 45, 65, 70, 77.
 
@@ -22,7 +22,7 @@ go run ./cmd/relay
 
 The admin interface is at `/admin`, on the same port as the relay. On first start, the relay logs a one-time setup link: open it and sign with a NIP-07 browser extension to become the admin. To set the admin in advance instead, set `RELAY_ADMIN_PUBKEY`.
 
-The seeds, allowed ports, indexer threshold and live subscription limits are changed there and kept in the state database.
+The seeds, allowed ports, indexer threshold, live subscription limits and the public search page are changed there and kept in the state database.
 
 Behind a reverse proxy that rewrites the `Host` header, set `RELAY_URL` to the public URL, otherwise the sign-in is refused as coming from another site.
 

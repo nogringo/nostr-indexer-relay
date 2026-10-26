@@ -142,16 +142,18 @@ Pages are rendered on the server, with a single script for NIP-07 signing. They 
 - Dashboard: indexed pubkeys, new or updated 10002 stored per day (UTC, last 30 days, from publications and from the crawler), active live subscriptions, detected indexers.
 - Relay registry: for each relay its NIP-77 status, activity, unique contribution, and live state, filtered by state and searched by URL, 100 relays per page. Actions: rerun the test, force a sync, ban the relay, force live.
 - A banned relay is no longer tested, synced or followed live. A relay forced live is followed whether it is an indexer or not, outside the live cap, as long as its NIP-77 test passed. The crawler picks up an action within a minute.
-- Settings: seeds, allowed ports, the indexer threshold, the live cap and the days before a quiet relay stops being followed live. The switch for the visitor interface comes with that interface. Settings are stored in the database, so nothing has to be configured through files. A change starts a discovery right away, so that new seeds and ports apply.
+- Settings: seeds, allowed ports, the indexer threshold, the live cap, the days before a quiet relay stops being followed live, and the switch for the visitor interface. Settings are stored in the database, so nothing has to be configured through files. A change starts a discovery right away, so that new seeds and ports apply.
 
 ### Visitors (`/`, can be turned off)
 
-- Search by npub, hex or NIP-05: shows the pubkey's relay list (read and write markers) and its date.
-- NIP-05 is resolved in the visitor's browser, never by the server, which would open another SSRF entry point.
-- Public stats: number of indexed pubkeys, most listed relays.
-- The relay URL, to add it as an indexer in a client.
+- Search by npub, hex or NIP-05: shows the pubkey's relay list (read and write markers) and its date. nprofile and the `nostr:` prefix of NIP-21 are accepted too.
+- Each list has its own page, `/p/<npub>`, which also shows the raw event. Other forms of the pubkey redirect to it.
+- NIP-05 is resolved in the visitor's browser, never by the server, which would open another SSRF entry point. Redirects are refused, as NIP-05 requires. The content security policy of the public pages lets scripts reach any `https://` origin for this, and nothing else. Without JavaScript, a NIP-05 search asks for an npub or a hex pubkey instead.
+- Public stats: number of indexed pubkeys, and the 20 most listed relays with the share of pubkeys that list them. Banned relays are left out. The stats are computed at most once a minute, since counting a full index takes a while.
+- The relay URL, to add it as an indexer in a client: `RELAY_URL` when set, otherwise the address the page was reached at.
+- `robots.txt` keeps crawlers away from `/p/` and `/admin`.
 
-When the admin turns the visitor interface off, the relay, NIP-11 and the admin keep working.
+When the admin turns the visitor interface off, the relay, NIP-11 and the admin keep working, and the public pages answer 404.
 
 ### Admin authentication
 
@@ -186,7 +188,7 @@ Negentropy sessions served to peers:
 3. Negentropy crawler: discovery, adaptive revisit, health, full-index negentropy serving. Done.
 4. Indexer detection and live subscriptions. Done.
 5. Admin interface and authentication. Done.
-6. Visitor interface.
+6. Visitor interface. Done.
 
 ## Open questions
 

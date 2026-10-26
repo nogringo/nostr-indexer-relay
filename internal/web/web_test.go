@@ -178,12 +178,18 @@ func TestSaveSettings(t *testing.T) {
 	}
 	saved := ta.Registry.Settings()
 	if !slices.Equal(saved.Seeds, []string{"wss://seed.example.com", "wss://other.example.com:7777"}) || !slices.Equal(saved.AllowedPorts, []int{7777}) ||
-		saved.IndexerShare != 0.4 || saved.LiveCap != 20 || saved.LiveQuietPeriod != 3*day {
+		saved.IndexerShare != 0.4 || saved.LiveCap != 20 || saved.LiveQuietPeriod != 3*day || saved.Visitors {
 		t.Errorf("unexpected settings %+v", saved)
 	}
 	if ta.changed != 1 {
 		t.Errorf("expected the crawler to be told once, got %d", ta.changed)
 	}
+
+	valid.Set("visitors", "on")
+	if status, _ := ta.postForm(t, "/admin/settings", valid, ""); status != http.StatusSeeOther || !ta.Registry.Settings().Visitors {
+		t.Errorf("expected the checked box to turn the public page on, got %d", status)
+	}
+	saved = ta.Registry.Settings()
 
 	invalid := url.Values{"seeds": {"wss://seed.example.com:8080"}, "ports": {"http"}, "indexer_share": {"0"}, "live_cap": {"-1"}, "quiet_days": {"0"}}
 	status, body := ta.postForm(t, "/admin/settings", invalid, "")
@@ -202,7 +208,7 @@ func TestSaveSettings(t *testing.T) {
 	if _, body := ta.postForm(t, "/admin/settings", url.Values{"seeds": {" "}, "indexer_share": {"50"}, "live_cap": {"1"}, "quiet_days": {"1"}}, ""); !strings.Contains(body, "Add at least one seed relay") {
 		t.Error("expected a seed to be required")
 	}
-	if got := ta.Registry.Settings(); !slices.Equal(got.Seeds, saved.Seeds) || ta.changed != 1 {
+	if got := ta.Registry.Settings(); !slices.Equal(got.Seeds, saved.Seeds) || !got.Visitors || ta.changed != 2 {
 		t.Errorf("expected refused settings to change nothing, got %+v", got)
 	}
 }
@@ -234,7 +240,7 @@ func TestPagesRender(t *testing.T) {
 		{"/admin/relays?status=supported&q=SEED", []string{"wss://seed.example.com", "1 relays"}},
 		{"/admin/relays?page=2", []string{"Previous page", "wss://relay000.example.com"}},
 		{"/admin/settings", []string{"wss://indexer.coracle.social", "Save settings", "npub1"}},
-		{"/admin/static/admin.js", []string{"signEvent"}},
+		{"/static/admin.js", []string{"signEvent"}},
 	} {
 		status, body := ta.get(t, test.path)
 		if status != http.StatusOK {
@@ -263,7 +269,7 @@ func TestBaseURL(t *testing.T) {
 }
 
 type testAdmin struct {
-	*Admin
+	*Site
 	server  *httptest.Server
 	client  *http.Client
 	changed int
@@ -283,7 +289,7 @@ func newTestAdmin(t *testing.T, fixedAdmin *nostr.PubKey) *testAdmin {
 	t.Cleanup(relays.Close)
 
 	ta := &testAdmin{}
-	ta.Admin = New(Config{
+	ta.Site = New(Config{
 		Name:            "Test relay",
 		Store:           store,
 		Registry:        relays,

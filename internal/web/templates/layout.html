@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} | {{.Relay}}</title>
-<link rel="stylesheet" href="/admin/static/admin.css">
-<script src="/admin/static/admin.js" defer></script>
+<link rel="stylesheet" href="/static/style.css">
+{{if .Public}}<script src="/static/search.js" defer></script>{{else}}<script src="/static/admin.js" defer></script>{{end}}
 </head>
-<body>
+<body{{if .Public}} class="public"{{end}}>
 {{if .SignedIn}}<header class="bar">
 <a class="name" href="/admin">{{.Relay}}</a>
 <nav aria-label="Admin">
@@ -16,6 +16,9 @@
 <a href="/admin/settings"{{if eq .Nav "settings"}} aria-current="page"{{end}}>Settings</a>
 </nav>
 <form method="post" action="/admin/logout"><button class="quiet">Sign out</button></form>
+</header>
+{{else if .Public}}<header class="bar">
+<a class="name" href="/">{{.Relay}}</a>
 </header>
 {{end}}<main>
 {{template "content" .}}

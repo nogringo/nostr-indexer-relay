@@ -1,0 +1,32 @@
+{{define "content"}}<form class="search compact" method="get" action="/" data-search>
+<label class="visually-hidden" for="q">npub, hex pubkey or NIP-05 address</label>
+<input id="q" name="q" placeholder="Look up another pubkey: npub, hex or name@example.com" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+<button>Look up</button>
+</form>
+<p class="search-status" data-search-status role="status"></p>
+
+<h1>Relay list</h1>
+<p class="pubkey url">{{.Npub}}</p>
+<p class="muted url">{{.Hex}}</p>
+{{if .Found}}
+<p class="note">Published {{.Published.Format "January 2, 2006 at 15:04 UTC"}}, {{ago .Published}}.</p>
+{{if .Relays}}<div class="table-scroll">
+<table class="list">
+<thead><tr><th>Relay</th><th>Read</th><th>Write</th></tr></thead>
+<tbody>{{range .Relays}}<tr>
+<td class="url">{{.URL}}</td>
+<td>{{if .Read}}<span aria-hidden="true">✓</span><span class="visually-hidden">yes</span>{{end}}</td>
+<td>{{if .Write}}<span aria-hidden="true">✓</span><span class="visually-hidden">yes</span>{{end}}</td>
+</tr>{{end}}</tbody>
+</table>
+</div>
+<p class="note">Clients read this user's notes from the write relays, and send mentions and replies to the read relays.</p>
+{{else}}<p>This list is empty: the author names no relay.</p>{{end}}
+<details>
+<summary>Show the event</summary>
+<pre class="event">{{.Event}}</pre>
+</details>
+{{else}}
+<p class="note">No relay list is known for this pubkey yet. The crawler keeps finding lists across the network, and authors can also publish theirs to this relay.</p>
+{{end}}
+{{end}}

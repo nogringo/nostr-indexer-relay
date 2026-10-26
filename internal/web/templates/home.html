@@ -1,0 +1,32 @@
+{{define "content"}}<section class="lookup">
+<h1>Find where a Nostr user reads and writes</h1>
+<p class="lede">Look up the relay list (NIP-65) of any pubkey this relay has indexed.</p>
+<form class="search" method="get" action="/" data-search>
+<label class="visually-hidden" for="q">npub, hex pubkey or NIP-05 address</label>
+<input id="q" name="q" value="{{.Query}}" placeholder="npub, hex pubkey or name@example.com" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+<button class="primary">Look up</button>
+</form>
+<p class="search-status{{if .Error}} error{{end}}" data-search-status role="status">{{.Error}}</p>
+</section>
+
+<section>
+<h2>Use this relay as an indexer</h2>
+<p class="note">Clients that follow the outbox model ask an indexer for the relay lists of the people you follow, to know where to find their notes. Add this address to your client's indexer relays.</p>
+<div class="copy">
+<input class="url" value="{{.RelayURL}}" readonly aria-label="Relay address" data-copy-source>
+<button data-copy>Copy</button>
+</div>
+</section>
+
+<section>
+<h2>{{number .Lists}} relay lists indexed</h2>
+<p class="note">One list per pubkey. The relay gathers them from across the network and keeps them up to date.</p>
+{{if .Top}}<h3>Most listed relays</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th class="num">Rank</th><th>Relay</th><th class="num">Listed by</th><th class="num">Share</th></tr></thead>
+<tbody>{{range .Top}}<tr><td class="num">{{.Rank}}</td><td class="url">{{.URL}}</td><td class="num">{{number .Lists}}</td><td class="num">{{.Share}}</td></tr>{{end}}</tbody>
+</table>
+</div>{{end}}
+</section>
+{{end}}

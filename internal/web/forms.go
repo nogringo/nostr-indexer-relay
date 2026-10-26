@@ -21,6 +21,7 @@ type settingsForm struct {
 	IndexerShare string
 	LiveCap      string
 	QuietDays    string
+	Visitors     bool
 }
 
 func newSettingsForm(settings registry.Settings) settingsForm {
@@ -34,12 +35,14 @@ func newSettingsForm(settings registry.Settings) settingsForm {
 		IndexerShare: strconv.FormatFloat(settings.IndexerShare*100, 'f', -1, 64),
 		LiveCap:      strconv.Itoa(settings.LiveCap),
 		QuietDays:    strconv.Itoa(int(settings.LiveQuietPeriod / day)),
+		Visitors:     settings.Visitors,
 	}
 }
 
 // parse returns current with the form's values, or an error message per invalid field.
 func (f settingsForm) parse(current registry.Settings) (registry.Settings, map[string]string) {
 	settings := current
+	settings.Visitors = f.Visitors
 	errs := make(map[string]string)
 
 	settings.AllowedPorts = nil

@@ -25,7 +25,7 @@ import (
 //go:embed templates static
 var files embed.FS
 
-var pages = parsePages("login", "overview", "relays", "settings")
+var pages = parsePages("login", "overview", "relays", "settings", "home", "profile")
 
 func parsePages(names ...string) map[string]*template.Template {
 	funcs := template.FuncMap{"number": number, "ago": ago, "status": status, "failures": failures}
@@ -49,31 +49,37 @@ type Config struct {
 	Log             *log.Logger
 }
 
-// Admin serves the admin interface under /admin.
-type Admin struct {
+// Site serves the visitor pages at the root and the admin interface under /admin.
+type Site struct {
 	Config
 
 	mu         sync.Mutex
 	setupToken string
 	usedLogins map[nostr.ID]time.Time
+
+	statsMu sync.Mutex
+	stats   publicStats
 }
 
-func New(cfg Config) *Admin {
-	return &Admin{Config: cfg, usedLogins: make(map[nostr.ID]time.Time)}
+func New(cfg Config) *Site {
+	return &Site{Config: cfg, usedLogins: make(map[nostr.ID]time.Time)}
 }
 
-func (a *Admin) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /admin", a.requireAdmin(a.overview))
+func (s *Site) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /admin", s.requireAdmin(s.overview))
 	mux.Handle("GET /admin/{$}", http.RedirectHandler("/admin", http.StatusMovedPermanently))
-	mux.HandleFunc("GET /admin/relays", a.requireAdmin(a.relays))
-	mux.HandleFunc("POST /admin/relays", a.requireAdmin(a.relayAction))
-	mux.HandleFunc("GET /admin/settings", a.requireAdmin(a.settings))
-	mux.HandleFunc("POST /admin/settings", a.requireAdmin(a.saveSettings))
-	mux.HandleFunc("GET /admin/setup", a.setup)
-	mux.HandleFunc("POST "+loginPath, a.login)
-	mux.HandleFunc("POST /admin/logout", a.logout)
+	mux.HandleFunc("GET /admin/relays", s.requireAdmin(s.relays))
+	mux.HandleFunc("POST /admin/relays", s.requireAdmin(s.relayAction))
+	mux.HandleFunc("GET /admin/settings", s.requireAdmin(s.settings))
+	mux.HandleFunc("POST /admin/settings", s.requireAdmin(s.saveSettings))
+	mux.HandleFunc("GET /admin/setup", s.setup)
+	mux.HandleFunc("POST "+loginPath, s.login)
+	mux.HandleFunc("POST /admin/logout", s.logout)
+	mux.HandleFunc("GET /{$}", s.requireVisitors(s.home))
+	mux.HandleFunc("GET /p/{pubkey}", s.requireVisitors(s.profile))
+	mux.HandleFunc("GET /robots.txt", robots)
 	static, _ := fs.Sub(files, "static")
-	mux.Handle("GET /admin/static/", http.StripPrefix("/admin/static/", http.FileServerFS(static)))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 }
 
 type page struct {
@@ -81,22 +87,33 @@ type page struct {
 	Title    string
 	Nav      string
 	SignedIn bool
+	Public   bool
 }
 
-func (a *Admin) page(title, nav string) page {
-	return page{Relay: a.Name, Title: title, Nav: nav, SignedIn: nav != ""}
+func (s *Site) page(title, nav string) page {
+	return page{Relay: s.Name, Title: title, Nav: nav, SignedIn: nav != ""}
 }
 
-func (a *Admin) render(w http.ResponseWriter, status int, name string, data any) {
+const (
+	adminPolicy = "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+	// NIP-05 addresses are fetched by the visitor's browser, from any https origin.
+	publicPolicy = "default-src 'self'; connect-src 'self' https:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+)
+
+func (s *Site) render(w http.ResponseWriter, status int, name string, data any) {
+	policy := adminPolicy
+	if name == "home" || name == "profile" {
+		policy = publicPolicy
+	}
 	var buf bytes.Buffer
 	if err := pages[name].ExecuteTemplate(&buf, "layout", data); err != nil {
-		a.Log.Printf("failed to render the %s page: %v", name, err)
+		s.Log.Printf("failed to render the %s page: %v", name, err)
 		http.Error(w, "the page could not be rendered", http.StatusInternalServerError)
 		return
 	}
 	header := w.Header()
 	header.Set("Content-Type", "text/html; charset=utf-8")
-	header.Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+	header.Set("Content-Security-Policy", policy)
 	header.Set("Referrer-Policy", "same-origin")
 	header.Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
@@ -115,14 +132,14 @@ type overviewData struct {
 	Chart     chart
 }
 
-func (a *Admin) overview(w http.ResponseWriter, r *http.Request) {
-	lists, err := a.Store.CountEvents(nostr.Filter{Kinds: []nostr.Kind{nostr.KindRelayListMetadata}})
+func (s *Site) overview(w http.ResponseWriter, r *http.Request) {
+	lists, err := s.Store.CountEvents(nostr.Filter{Kinds: []nostr.Kind{nostr.KindRelayListMetadata}})
 	if err != nil {
 		http.Error(w, "failed to count the stored lists: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	data := overviewData{page: a.page("Overview", "overview"), Lists: int(lists)}
-	for _, relay := range a.Registry.All() {
+	data := overviewData{page: s.page("Overview", "overview"), Lists: int(lists)}
+	for _, relay := range s.Registry.All() {
 		if !relay.Forgotten() {
 			data.Tracked++
 			if relay.NIP77 == registry.NIP77Supported {
@@ -139,8 +156,8 @@ func (a *Admin) overview(w http.ResponseWriter, r *http.Request) {
 	slices.SortFunc(data.Indexers, func(a, b registry.Relay) int {
 		return cmp.Or(cmp.Compare(b.Lists, a.Lists), strings.Compare(a.URL, b.URL))
 	})
-	data.Chart = newChart(a.Registry.StoredPerDay(time.Now(), chartDays))
-	a.render(w, http.StatusOK, "overview", data)
+	data.Chart = newChart(s.Registry.StoredPerDay(time.Now(), chartDays))
+	s.render(w, http.StatusOK, "overview", data)
 }
 
 const relaysPerPage = 100
@@ -183,7 +200,7 @@ type relaysData struct {
 	Return string
 }
 
-func (a *Admin) relays(w http.ResponseWriter, r *http.Request) {
+func (s *Site) relays(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	view := relaysView{status: query.Get("status"), search: strings.TrimSpace(query.Get("q"))}
 	view.page, _ = strconv.Atoi(query.Get("page"))
@@ -196,8 +213,8 @@ func (a *Admin) relays(w http.ResponseWriter, r *http.Request) {
 	}
 	view.status = filter.value
 
-	all := a.Registry.All()
-	data := relaysData{page: a.page("Relays", "relays"), Query: view.search}
+	all := s.Registry.All()
+	data := relaysData{page: s.page("Relays", "relays"), Query: view.search}
 	for _, candidate := range relayFilters {
 		option := filterOption{Value: candidate.value, Label: candidate.label, Selected: candidate.value == filter.value}
 		for _, relay := range all {
@@ -234,7 +251,7 @@ func (a *Admin) relays(w http.ResponseWriter, r *http.Request) {
 	if view.page < data.Pages {
 		data.NextURL = "/admin/relays?" + view.query(view.page+1)
 	}
-	a.render(w, http.StatusOK, "relays", data)
+	s.render(w, http.StatusOK, "relays", data)
 }
 
 type relaysView struct {
@@ -265,22 +282,22 @@ var relayActions = map[string]func(*registry.Relay){
 	"unban":        func(r *registry.Relay) { r.Banned = false },
 }
 
-func (a *Admin) relayAction(w http.ResponseWriter, r *http.Request) {
+func (s *Site) relayAction(w http.ResponseWriter, r *http.Request) {
 	relayURL, action := r.PostFormValue("url"), r.PostFormValue("action")
 	update, ok := relayActions[action]
 	if !ok {
 		http.Error(w, "unknown action "+action, http.StatusBadRequest)
 		return
 	}
-	if _, ok := a.Registry.Get(relayURL); !ok {
+	if _, ok := s.Registry.Get(relayURL); !ok {
 		http.Error(w, "unknown relay "+relayURL, http.StatusNotFound)
 		return
 	}
-	if err := a.Registry.Update(relayURL, update); err != nil {
+	if err := s.Registry.Update(relayURL, update); err != nil {
 		http.Error(w, "failed to update the relay: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	a.Log.Printf("admin: %s %s", action, relayURL)
+	s.Log.Printf("admin: %s %s", action, relayURL)
 
 	// Rebuilt from the known parameters only, so that the redirect stays on this page.
 	back, _ := url.ParseQuery(r.PostFormValue("return"))
@@ -289,30 +306,31 @@ func (a *Admin) relayAction(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/relays?"+view.query(view.page), http.StatusSeeOther)
 }
 
-func (a *Admin) settings(w http.ResponseWriter, r *http.Request) {
-	a.renderSettings(w, http.StatusOK, newSettingsForm(a.Registry.Settings()), nil)
+func (s *Site) settings(w http.ResponseWriter, r *http.Request) {
+	s.renderSettings(w, http.StatusOK, newSettingsForm(s.Registry.Settings()), nil)
 }
 
-func (a *Admin) saveSettings(w http.ResponseWriter, r *http.Request) {
+func (s *Site) saveSettings(w http.ResponseWriter, r *http.Request) {
 	form := settingsForm{
 		Seeds:        r.PostFormValue("seeds"),
 		Ports:        r.PostFormValue("ports"),
 		IndexerShare: r.PostFormValue("indexer_share"),
 		LiveCap:      r.PostFormValue("live_cap"),
 		QuietDays:    r.PostFormValue("quiet_days"),
+		Visitors:     r.PostFormValue("visitors") != "",
 	}
-	settings, errs := form.parse(a.Registry.Settings())
+	settings, errs := form.parse(s.Registry.Settings())
 	if len(errs) > 0 {
-		a.renderSettings(w, http.StatusBadRequest, form, errs)
+		s.renderSettings(w, http.StatusBadRequest, form, errs)
 		return
 	}
-	if err := a.Registry.SetSettings(settings); err != nil {
+	if err := s.Registry.SetSettings(settings); err != nil {
 		http.Error(w, "failed to save the settings: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	a.Log.Printf("admin: settings changed")
-	if a.SettingsChanged != nil {
-		a.SettingsChanged()
+	s.Log.Printf("admin: settings changed")
+	if s.SettingsChanged != nil {
+		s.SettingsChanged()
 	}
 	http.Redirect(w, r, "/admin/settings", http.StatusSeeOther)
 }
@@ -325,12 +343,12 @@ type settingsData struct {
 	AdminFromEnv bool
 }
 
-func (a *Admin) renderSettings(w http.ResponseWriter, status int, form settingsForm, errs map[string]string) {
-	data := settingsData{page: a.page("Settings", "settings"), settingsForm: form, Errors: errs, AdminFromEnv: a.AdminPubKey != nil}
-	if admin, ok := a.admin(); ok {
+func (s *Site) renderSettings(w http.ResponseWriter, status int, form settingsForm, errs map[string]string) {
+	data := settingsData{page: s.page("Settings", "settings"), settingsForm: form, Errors: errs, AdminFromEnv: s.AdminPubKey != nil}
+	if admin, ok := s.admin(); ok {
 		data.Admin = nip19.EncodeNpub(admin)
 	}
-	a.render(w, status, "settings", data)
+	s.render(w, status, "settings", data)
 }
 
 func number(n int) string {

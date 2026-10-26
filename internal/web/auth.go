@@ -29,25 +29,25 @@ const (
 	loginPath              = "/admin/login"
 )
 
-func (a *Admin) admin() (nostr.PubKey, bool) {
-	if a.AdminPubKey != nil {
-		return *a.AdminPubKey, true
+func (s *Site) admin() (nostr.PubKey, bool) {
+	if s.AdminPubKey != nil {
+		return *s.AdminPubKey, true
 	}
-	return a.Registry.Admin()
+	return s.Registry.Admin()
 }
 
 // SetupLink returns a one-time link that makes whoever signs on it the admin, when the relay
 // has none yet. Each call replaces the previous link.
-func (a *Admin) SetupLink(base string) (string, bool) {
-	if _, ok := a.admin(); ok {
+func (s *Site) SetupLink(base string) (string, bool) {
+	if _, ok := s.admin(); ok {
 		return "", false
 	}
 	token := make([]byte, 16)
 	rand.Read(token)
-	a.mu.Lock()
-	a.setupToken = hex.EncodeToString(token)
-	defer a.mu.Unlock()
-	return strings.TrimSuffix(base, "/") + "/admin/setup?token=" + a.setupToken, true
+	s.mu.Lock()
+	s.setupToken = hex.EncodeToString(token)
+	defer s.mu.Unlock()
+	return strings.TrimSuffix(base, "/") + "/admin/setup?token=" + s.setupToken, true
 }
 
 // BaseURL returns the HTTP address of the relay, taken from its public URL when one is set.
@@ -68,19 +68,19 @@ func BaseURL(relayURL, addr string) string {
 	return "http://" + net.JoinHostPort(host, port)
 }
 
-func (a *Admin) tokenMatches(token string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.setupToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(a.setupToken)) == 1
+func (s *Site) tokenMatches(token string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.setupToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.setupToken)) == 1
 }
 
-func (a *Admin) consumeToken(token string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.setupToken == "" || subtle.ConstantTimeCompare([]byte(token), []byte(a.setupToken)) != 1 {
+func (s *Site) consumeToken(token string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.setupToken == "" || subtle.ConstantTimeCompare([]byte(token), []byte(s.setupToken)) != 1 {
 		return false
 	}
-	a.setupToken = ""
+	s.setupToken = ""
 	return true
 }
 
@@ -92,15 +92,15 @@ type loginData struct {
 	TokenValid bool
 }
 
-func (a *Admin) setup(w http.ResponseWriter, r *http.Request) {
+func (s *Site) setup(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
-	_, hasAdmin := a.admin()
-	data := loginData{page: a.page("Set up", ""), Setup: true, HasAdmin: hasAdmin, Token: token, TokenValid: !hasAdmin && a.tokenMatches(token)}
-	a.render(w, http.StatusOK, "login", data)
+	_, hasAdmin := s.admin()
+	data := loginData{page: s.page("Set up", ""), Setup: true, HasAdmin: hasAdmin, Token: token, TokenValid: !hasAdmin && s.tokenMatches(token)}
+	s.render(w, http.StatusOK, "login", data)
 }
 
-func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
-	if !a.sameOrigin(r) {
+func (s *Site) login(w http.ResponseWriter, r *http.Request) {
+	if !s.sameOrigin(r) {
 		http.Error(w, "cross-origin request refused", http.StatusForbidden)
 		return
 	}
@@ -113,35 +113,35 @@ func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	if err := a.checkLoginEvent(body.Event, r, now); err != nil {
+	if err := s.checkLoginEvent(body.Event, r, now); err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
 	pubkey := body.Event.PubKey
-	admin, hasAdmin := a.admin()
+	admin, hasAdmin := s.admin()
 	switch {
 	case hasAdmin && pubkey == admin:
 	case hasAdmin:
 		http.Error(w, "This key is not the admin of this relay.", http.StatusForbidden)
 		return
-	case !a.consumeToken(body.Token):
+	case !s.consumeToken(body.Token):
 		http.Error(w, "This setup link is no longer valid. Restart the relay to get a new one in its log.", http.StatusUnauthorized)
 		return
 	default:
-		if err := a.Registry.SetAdmin(pubkey); err != nil {
+		if err := s.Registry.SetAdmin(pubkey); err != nil {
 			http.Error(w, "failed to store the admin: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		a.Log.Printf("%s is now the admin", nip19.EncodeNpub(pubkey))
+		s.Log.Printf("%s is now the admin", nip19.EncodeNpub(pubkey))
 	}
 
-	http.SetCookie(w, a.sessionCookie(pubkey, now, isHTTPS(r)))
+	http.SetCookie(w, s.sessionCookie(pubkey, now, isHTTPS(r)))
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // checkLoginEvent accepts a NIP-98 event signed for our login URL in the last minute, once.
-func (a *Admin) checkLoginEvent(event nostr.Event, r *http.Request, now time.Time) error {
+func (s *Site) checkLoginEvent(event nostr.Event, r *http.Request, now time.Time) error {
 	if event.Kind != loginKind {
 		return errors.New("The login event must be a NIP-98 event, kind 27235.")
 	}
@@ -153,21 +153,21 @@ func (a *Admin) checkLoginEvent(event nostr.Event, r *http.Request, now time.Tim
 		return errors.New("The login event is more than a minute off. Check your computer's clock.")
 	}
 	u, err := url.Parse(tagValue(event, "u"))
-	if err != nil || !a.ownHost(r, u.Host) || u.Path != loginPath || !strings.EqualFold(tagValue(event, "method"), http.MethodPost) {
+	if err != nil || !s.ownHost(r, u.Host) || u.Path != loginPath || !strings.EqualFold(tagValue(event, "method"), http.MethodPost) {
 		return errors.New("The login event was signed for another page.")
 	}
 
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for id, usedAt := range a.usedLogins {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, usedAt := range s.usedLogins {
 		if now.Sub(usedAt) > 2*loginMaxAge {
-			delete(a.usedLogins, id)
+			delete(s.usedLogins, id)
 		}
 	}
-	if _, used := a.usedLogins[event.ID]; used {
+	if _, used := s.usedLogins[event.ID]; used {
 		return errors.New("This login event was already used.")
 	}
-	a.usedLogins[event.ID] = now
+	s.usedLogins[event.ID] = now
 	return nil
 }
 
@@ -178,8 +178,8 @@ func tagValue(event nostr.Event, key string) string {
 	return ""
 }
 
-func (a *Admin) logout(w http.ResponseWriter, r *http.Request) {
-	if !a.sameOrigin(r) {
+func (s *Site) logout(w http.ResponseWriter, r *http.Request) {
+	if !s.sameOrigin(r) {
 		http.Error(w, "cross-origin request refused", http.StatusForbidden)
 		return
 	}
@@ -188,12 +188,12 @@ func (a *Admin) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // The session cookie holds the admin pubkey and an expiry, signed with a key kept in the registry.
-func (a *Admin) sessionCookie(pubkey nostr.PubKey, now time.Time, secure bool) *http.Cookie {
+func (s *Site) sessionCookie(pubkey nostr.PubKey, now time.Time, secure bool) *http.Cookie {
 	expires := now.Add(sessionDuration)
 	value := pubkey.Hex() + "." + strconv.FormatInt(expires.Unix(), 10)
 	return &http.Cookie{
 		Name:     sessionCookie,
-		Value:    value + "." + a.sign(value),
+		Value:    value + "." + s.sign(value),
 		Path:     "/admin",
 		Expires:  expires,
 		HttpOnly: true,
@@ -202,19 +202,19 @@ func (a *Admin) sessionCookie(pubkey nostr.PubKey, now time.Time, secure bool) *
 	}
 }
 
-func (a *Admin) sign(value string) string {
-	mac := hmac.New(sha256.New, a.Registry.SessionSecret())
+func (s *Site) sign(value string) string {
+	mac := hmac.New(sha256.New, s.Registry.SessionSecret())
 	mac.Write([]byte(value))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func (a *Admin) signedIn(r *http.Request) bool {
+func (s *Site) signedIn(r *http.Request) bool {
 	cookie, err := r.Cookie(sessionCookie)
 	if err != nil {
 		return false
 	}
 	cut := strings.LastIndexByte(cookie.Value, '.')
-	if cut < 0 || !hmac.Equal([]byte(cookie.Value[cut+1:]), []byte(a.sign(cookie.Value[:cut]))) {
+	if cut < 0 || !hmac.Equal([]byte(cookie.Value[cut+1:]), []byte(s.sign(cookie.Value[:cut]))) {
 		return false
 	}
 	pubkey, expiry, _ := strings.Cut(cookie.Value[:cut], ".")
@@ -222,17 +222,17 @@ func (a *Admin) signedIn(r *http.Request) bool {
 	if err != nil || time.Now().Unix() > expires {
 		return false
 	}
-	admin, ok := a.admin()
+	admin, ok := s.admin()
 	return ok && admin.Hex() == pubkey
 }
 
-func (a *Admin) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+func (s *Site) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && !a.sameOrigin(r) {
+		if r.Method != http.MethodGet && !s.sameOrigin(r) {
 			http.Error(w, "cross-origin request refused", http.StatusForbidden)
 			return
 		}
-		if a.signedIn(r) {
+		if s.signedIn(r) {
 			next(w, r)
 			return
 		}
@@ -240,27 +240,27 @@ func (a *Admin) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "sign in first", http.StatusUnauthorized)
 			return
 		}
-		_, hasAdmin := a.admin()
-		a.render(w, http.StatusUnauthorized, "login", loginData{page: a.page("Sign in", ""), HasAdmin: hasAdmin})
+		_, hasAdmin := s.admin()
+		s.render(w, http.StatusUnauthorized, "login", loginData{page: s.page("Sign in", ""), HasAdmin: hasAdmin})
 	}
 }
 
 // sameOrigin refuses requests that a browser sent from another site. The session cookie is
 // SameSite=Strict as well; this covers browsers that ignore it.
-func (a *Admin) sameOrigin(r *http.Request) bool {
+func (s *Site) sameOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
 	}
 	u, err := url.Parse(origin)
-	return err == nil && a.ownHost(r, u.Host)
+	return err == nil && s.ownHost(r, u.Host)
 }
 
-func (a *Admin) ownHost(r *http.Request, host string) bool {
+func (s *Site) ownHost(r *http.Request, host string) bool {
 	if host == r.Host {
 		return true
 	}
-	public, err := url.Parse(a.PublicURL)
+	public, err := url.Parse(s.PublicURL)
 	return err == nil && public.Host != "" && host == public.Host
 }
 
