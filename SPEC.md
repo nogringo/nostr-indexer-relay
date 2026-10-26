@@ -106,15 +106,20 @@ For each relay the registry keeps:
 ### Indexer detection
 
 - A relay is an indexer when it holds a large share of the 10002 we know, 50 % by default, once our own index is filled. What the relay says about itself does not count.
-- First signal, before any sync: a NIP-45 `COUNT` on `{"kinds":[10002]}`, for relays that support it.
-- After a sync, negentropy gives the exact figure: their count = our count - ids only we have + ids only they have.
+- Our index counts as filled once every seed that passed the NIP-77 test has been visited at least once. Until then, the seeds are the only indexers.
+- First signal, before any sync: a NIP-45 `COUNT` on `{"kinds":[10002]}`, for relays that support it. It is sent on the connection of the NIP-77 test, as long as no sync has measured the relay.
+- After a sync, negentropy gives the exact figure: their count = our count - ids only we have + ids only they have. A sync that does not reach its last window measures nothing.
 - Seed relays are treated as indexers until measured.
+- Relays are classified again every minute, against the current number of lists in our index. A relay that holds no list is never an indexer.
 
 ### Live subscriptions
 
 - One REQ per relay: `{"kinds":[10002],"since":<now>}`.
 - Indexers: always live, no cap.
 - Non-indexers: live only while they bring 10002 that no indexer delivered. A relay that brings none for 7 days loses its live subscription and keeps only negentropy visits. Cap of 50 by default, keeping the relays with the largest unique contribution.
+- A list counts toward the unique contribution of the non-indexer that delivered it first, through a sync or live, when no indexer delivers it within 1 minute: a new list often reaches several relays at once. Nothing counts before our index is filled, since the indexers have not delivered everything yet.
+- The unique contribution is a running total, and the 7 days run from the last unique list.
+- The set of live relays is recomputed every minute. A subscription that drops is reopened at the next check. A relay that cannot be reached is handed back to the tester's backoff, as for syncs.
 - After a disconnection, the gap is filled by the next negentropy sync, not by the live subscription.
 
 ### SSRF protection
@@ -174,10 +179,11 @@ Negentropy sessions served to peers:
 1. Relay base: kind 10002 only, NIP-11, NIP-45, NIP-77, high limits, Docker image. Done.
 2. Relay registry, SSRF-safe dialer, NIP-77 test. Done.
 3. Negentropy crawler: discovery, adaptive revisit, health, full-index negentropy serving. Done.
-4. Indexer detection and live subscriptions.
+4. Indexer detection and live subscriptions. Done.
 5. Admin interface and authentication.
 6. Visitor interface.
 
 ## Open questions
 
-- Starting values (revisit minimum and maximum, 7 days, cap of 50, 50 % threshold, 16 parallel tests, 10 second timeout, 15 minute discovery, backoff and dead thresholds) are to be tuned on real data.
+- Starting values (revisit minimum and maximum, 7 days, cap of 50, 50 % threshold, 16 parallel tests, 10 second timeout, 15 minute discovery, backoff and dead thresholds, 1 minute grace for unique lists) are to be tuned on real data.
+- With a running total, a relay that brought many unique lists long ago outranks a recent contributor once the cap of 50 is reached. A total over a recent period would fix this, if it matters on real data.

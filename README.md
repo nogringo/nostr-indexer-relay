@@ -2,7 +2,7 @@
 
 Turnkey Nostr indexer relay. It stores NIP-65 relay lists (kind 10002) only, and fills itself by crawling the network over NIP-77.
 
-Status: early. The relay accepts and serves kind 10002. The crawler discovers relays from the stored lists, tests their NIP-77 support and syncs from the ones that pass. Live subscriptions, indexer detection and the web interface are not written yet. See [SPEC.md](SPEC.md) for the full design.
+Status: early. The relay accepts and serves kind 10002. The crawler discovers relays from the stored lists, tests their NIP-77 support and syncs from the ones that pass. It detects the indexers and follows them live, along with the relays that bring lists the indexers miss. The web interface is not written yet. See [SPEC.md](SPEC.md) for the full design.
 
 Supported NIPs: 1, 11, 40, 42, 45, 65, 70, 77.
 

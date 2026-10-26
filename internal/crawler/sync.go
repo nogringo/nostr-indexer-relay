@@ -37,9 +37,16 @@ func (e *connectError) Unwrap() error { return e.err }
 
 type relayMessage struct{ label, first, second string }
 
+type reconciliation struct {
+	onlyTheirs []nostr.ID
+	onlyOurs   int
+}
+
 type syncResult struct {
 	stored     int
 	boundaries []nostr.Timestamp
+	// Number of lists the relay holds, summed over the windows synced so far.
+	lists int
 }
 
 // syncRelay downloads, one since/until window at a time, the lists the relay has and we lack.
@@ -71,7 +78,7 @@ func (c *Crawler) syncRelay(ctx context.Context, url string, boundaries []nostr.
 
 	for i := 0; i <= len(result.boundaries); {
 		since, until := window(result.boundaries, i)
-		ids, err := c.reconcile(ctx, conn, incoming, since, until)
+		ids, lists, err := c.reconcile(ctx, conn, incoming, since, until)
 		if errors.Is(err, errTooMany) {
 			cut, ok := split(since, until, nostr.Now())
 			if !ok {
@@ -85,7 +92,8 @@ func (c *Crawler) syncRelay(ctx context.Context, url string, boundaries []nostr.
 			return result, err
 		}
 
-		stored, err := c.fetch(ctx, conn, ids)
+		result.lists += lists
+		stored, err := c.fetch(ctx, conn, url, ids)
 		result.stored += stored
 		if err != nil {
 			return result, err
@@ -119,8 +127,9 @@ func split(since, until, now nostr.Timestamp) (nostr.Timestamp, bool) {
 	return lo + (hi-lo)/2, true
 }
 
-// reconcile runs one negentropy session on a window and returns the ids the relay has and we lack.
-func (c *Crawler) reconcile(ctx context.Context, conn *nostr.Relay, incoming <-chan relayMessage, since, until nostr.Timestamp) ([]nostr.ID, error) {
+// reconcile runs one negentropy session on a window and returns the ids the relay has and we
+// lack, and the number of lists the relay holds in it.
+func (c *Crawler) reconcile(ctx context.Context, conn *nostr.Relay, incoming <-chan relayMessage, since, until nostr.Timestamp) ([]nostr.ID, int, error) {
 	filter := nostr.Filter{Kinds: relayListsFilter.Kinds, Since: since, Until: until}
 	local := vector.New()
 	for event := range scan.Events(c.store, filter, scan.PageSize) {
@@ -128,25 +137,34 @@ func (c *Crawler) reconcile(ctx context.Context, conn *nostr.Relay, incoming <-c
 	}
 	local.Seal()
 
-	neg := negentropy.New(local, negentropyFrameSize, false, true)
-	// Reconcile blocks on HaveNots once its buffer is full, so it is drained as it goes.
+	// Haves only reports the ids we have and they lack: nothing is uploaded.
+	neg := negentropy.New(local, negentropyFrameSize, true, true)
+	// Reconcile blocks on Haves and HaveNots once their buffers are full, so they are drained as it goes.
 	done := make(chan struct{})
 	defer close(done)
-	collected := make(chan []nostr.ID, 1)
+	collected := make(chan reconciliation, 1)
 	go func() {
-		var ids []nostr.ID
-		for {
+		var found reconciliation
+		haves, haveNots := neg.Haves, neg.HaveNots
+		for haves != nil || haveNots != nil {
 			select {
-			case id, ok := <-neg.HaveNots:
+			case _, ok := <-haves:
 				if !ok {
-					collected <- ids
-					return
+					haves = nil
+					continue
 				}
-				ids = append(ids, id)
+				found.onlyOurs++
+			case id, ok := <-haveNots:
+				if !ok {
+					haveNots = nil
+					continue
+				}
+				found.onlyTheirs = append(found.onlyTheirs, id)
 			case <-done:
 				return
 			}
 		}
+		collected <- found
 	}()
 
 	for len(incoming) > 0 {
@@ -154,10 +172,10 @@ func (c *Crawler) reconcile(ctx context.Context, conn *nostr.Relay, incoming <-c
 	}
 	open, err := nip77.OpenEnvelope{SubscriptionID: syncSubscription, Filter: filter, Message: neg.Start()}.MarshalJSON()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err := conn.WriteWithError(open); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() {
 		if close, err := (nip77.CloseEnvelope{SubscriptionID: syncSubscription}).MarshalJSON(); err == nil {
@@ -170,34 +188,35 @@ func (c *Crawler) reconcile(ctx context.Context, conn *nostr.Relay, incoming <-c
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, 0, ctx.Err()
 		case <-timer.C:
-			return nil, errors.New("no negentropy answer")
+			return nil, 0, errors.New("no negentropy answer")
 		case message := <-incoming:
 			switch {
 			case message.label == "NOTICE":
-				return nil, fmt.Errorf("notice: %s", message.first)
+				return nil, 0, fmt.Errorf("notice: %s", message.first)
 			case message.first != syncSubscription:
 				continue
 			case message.label == "NEG-ERR", message.label == "NEG-ERROR":
 				if strings.Contains(message.second, "too many") || strings.Contains(message.second, "too big") {
-					return nil, errTooMany
+					return nil, 0, errTooMany
 				}
-				return nil, fmt.Errorf("negentropy refused: %s", message.second)
+				return nil, 0, fmt.Errorf("negentropy refused: %s", message.second)
 			case message.label == "NEG-MSG":
 				next, err := neg.Reconcile(message.second)
 				if err != nil {
-					return nil, err
+					return nil, 0, err
 				}
 				if next == "" {
-					return <-collected, nil
+					found := <-collected
+					return found.onlyTheirs, local.Size() - found.onlyOurs + len(found.onlyTheirs), nil
 				}
 				reply, err := nip77.MessageEnvelope{SubscriptionID: syncSubscription, Message: next}.MarshalJSON()
 				if err != nil {
-					return nil, err
+					return nil, 0, err
 				}
 				if err := conn.WriteWithError(reply); err != nil {
-					return nil, err
+					return nil, 0, err
 				}
 				timer.Reset(roundTimeout)
 			}
@@ -207,7 +226,7 @@ func (c *Crawler) reconcile(ctx context.Context, conn *nostr.Relay, incoming <-c
 
 // fetch downloads the events by id and returns how many were stored. A relay may return fewer
 // events than asked for (its max_limit), so missing ids are asked again until a pass brings none.
-func (c *Crawler) fetch(ctx context.Context, conn *nostr.Relay, ids []nostr.ID) (int, error) {
+func (c *Crawler) fetch(ctx context.Context, conn *nostr.Relay, url string, ids []nostr.ID) (int, error) {
 	stored := 0
 	for len(ids) > 0 {
 		received := make(map[nostr.ID]bool)
@@ -221,7 +240,7 @@ func (c *Crawler) fetch(ctx context.Context, conn *nostr.Relay, ids []nostr.ID) 
 				select {
 				case event := <-sub.Events:
 					received[event.ID] = true
-					if c.ingest(ctx, event) {
+					if c.receive(ctx, url, event) {
 						stored++
 					}
 				case <-sub.EndOfStoredEvents:

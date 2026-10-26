@@ -25,6 +25,16 @@ const (
 	NIP77Forbidden   NIP77Status = "forbidden"
 )
 
+type ListsSource string
+
+const (
+	ListsUnmeasured ListsSource = ""
+	// A NIP-45 COUNT, kept until a full sync measures the relay.
+	ListsCounted ListsSource = "count"
+	// A full negentropy sync, which is exact.
+	ListsSynced ListsSource = "sync"
+)
+
 type Relay struct {
 	URL        string      `json:"url"`
 	Seed       bool        `json:"seed,omitempty"`
@@ -42,6 +52,21 @@ type Relay struct {
 	SyncDetail   string        `json:"sync_detail,omitempty"`
 	// Boundaries between the since/until windows the relay accepts one negentropy session for.
 	SyncBoundaries []nostr.Timestamp `json:"sync_boundaries,omitempty"`
+
+	// Number of 10002 the relay holds.
+	Lists       int         `json:"lists,omitempty"`
+	ListsSource ListsSource `json:"lists_source,omitempty"`
+	ListsAt     time.Time   `json:"lists_at,omitzero"`
+	Indexer     bool        `json:"indexer,omitempty"`
+	// Lists received from this relay that no indexer had delivered, and when the last one came.
+	Unique   int       `json:"unique,omitempty"`
+	UniqueAt time.Time `json:"unique_at,omitzero"`
+	Live     bool      `json:"live,omitempty"`
+}
+
+// Forgotten reports whether the relay is no seed and no stored list mentions it any more.
+func (relay Relay) Forgotten() bool {
+	return !relay.Seed && relay.Popularity == 0
 }
 
 // Registry keeps every relay in memory and writes each change through to LMDB.
@@ -179,7 +204,7 @@ func (r *Registry) due(n int, isDue func(*Relay) bool) []Relay {
 
 	var due []Relay
 	for _, relay := range r.relays {
-		if (relay.Seed || relay.Popularity > 0) && isDue(relay) {
+		if !relay.Forgotten() && isDue(relay) {
 			due = append(due, *relay)
 		}
 	}
@@ -193,6 +218,18 @@ func (r *Registry) due(n int, isDue func(*Relay) bool) []Relay {
 		return cmp.Or(cmp.Compare(b.Popularity, a.Popularity), strings.Compare(a.URL, b.URL))
 	})
 	return due[:min(n, len(due))]
+}
+
+// All returns a copy of every relay.
+func (r *Registry) All() []Relay {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	relays := make([]Relay, 0, len(r.relays))
+	for _, relay := range r.relays {
+		relays = append(relays, *relay)
+	}
+	return relays
 }
 
 func (r *Registry) Update(url string, update func(*Relay)) error {
@@ -209,6 +246,27 @@ func (r *Registry) Update(url string, update func(*Relay)) error {
 		return err
 	}
 	r.relays[url] = &updated
+	return nil
+}
+
+// UpdateAll applies update to every relay and keeps the changes of the ones it reports as changed.
+func (r *Registry) UpdateAll(update func(*Relay) bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var changed []*Relay
+	for _, relay := range r.relays {
+		updated := *relay
+		if update(&updated) {
+			changed = append(changed, &updated)
+		}
+	}
+	if err := r.put(changed...); err != nil {
+		return err
+	}
+	for _, relay := range changed {
+		r.relays[relay.URL] = relay
+	}
 	return nil
 }
 

@@ -20,13 +20,23 @@ const (
 	probeTimeout      = 10 * time.Second
 	probeReadLimit    = 4 << 20
 	probeSubscription = "nip77-test"
+	countSubscription = "count"
 	userAgent         = "nostr-indexer-relay"
 )
 
 var relayListsFilter = nostr.Filter{Kinds: []nostr.Kind{nostr.KindRelayListMetadata}}
 
-// probeNIP77 opens a negentropy session on kind 10002 and classifies the first answer.
-func probeNIP77(ctx context.Context, client *http.Client, url string) (registry.NIP77Status, string) {
+type probeResult struct {
+	status registry.NIP77Status
+	detail string
+	// The relay's answer to a NIP-45 COUNT of its lists, when one was asked for and given.
+	lists   int
+	counted bool
+}
+
+// probeNIP77 opens a negentropy session on kind 10002 and classifies the first answer. When
+// withCount is set and the relay supports NIP-77, it also asks for a NIP-45 COUNT of its lists.
+func probeNIP77(ctx context.Context, client *http.Client, url string, withCount bool) probeResult {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
@@ -35,14 +45,23 @@ func probeNIP77(ctx context.Context, client *http.Client, url string) (registry.
 		HTTPHeader: http.Header{"User-Agent": {userAgent}},
 	})
 	if errors.Is(err, errForbiddenAddress) {
-		return registry.NIP77Forbidden, err.Error()
+		return probeResult{status: registry.NIP77Forbidden, detail: err.Error()}
 	}
 	if err != nil {
-		return registry.NIP77Unreachable, err.Error()
+		return probeResult{status: registry.NIP77Unreachable, detail: err.Error()}
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(probeReadLimit)
 
+	var result probeResult
+	result.status, result.detail = testNegentropy(ctx, conn)
+	if withCount && result.status == registry.NIP77Supported {
+		result.lists, result.counted = countLists(ctx, conn)
+	}
+	return result
+}
+
+func testNegentropy(ctx context.Context, conn *websocket.Conn) (registry.NIP77Status, string) {
 	open, err := nip77.OpenEnvelope{SubscriptionID: probeSubscription, Filter: relayListsFilter, Message: emptySetMessage()}.MarshalJSON()
 	if err != nil {
 		return registry.NIP77Unknown, err.Error()
@@ -72,6 +91,39 @@ func probeNIP77(ctx context.Context, client *http.Client, url string) (registry.
 			return registry.NIP77Supported, second
 		case label == "CLOSED":
 			return registry.NIP77Unsupported, second
+		}
+	}
+}
+
+// countLists asks for a NIP-45 COUNT on kind 10002 and reports false when the relay gives none.
+func countLists(ctx context.Context, conn *websocket.Conn) (int, bool) {
+	request, err := nostr.CountEnvelope{SubscriptionID: countSubscription, Filter: relayListsFilter}.MarshalJSON()
+	if err != nil || conn.Write(ctx, websocket.MessageText, request) != nil {
+		return 0, false
+	}
+
+	for {
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			return 0, false
+		}
+		label, subscription, _ := parseMessage(data)
+		switch {
+		case label == "NOTICE":
+			return 0, false
+		case subscription != countSubscription:
+			continue
+		case label == "COUNT":
+			var parts []json.RawMessage
+			var answer struct {
+				Count *int `json:"count"`
+			}
+			if json.Unmarshal(data, &parts) != nil || len(parts) < 3 || json.Unmarshal(parts[2], &answer) != nil || answer.Count == nil {
+				return 0, false
+			}
+			return *answer.Count, true
+		default:
+			return 0, false
 		}
 	}
 }

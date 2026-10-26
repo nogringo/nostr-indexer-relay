@@ -13,6 +13,7 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore/lmdb"
 
+	"nostr-indexer-relay/internal/registry"
 	indexer "nostr-indexer-relay/internal/relay"
 )
 
@@ -76,6 +77,9 @@ func TestSyncRelayDownloadsWhatWeLackWindowByWindow(t *testing.T) {
 	if result.stored != 8 {
 		t.Errorf("expected 7 new lists and 1 newer one, got %d stored", result.stored)
 	}
+	if result.lists != 12 {
+		t.Errorf("expected the sync to measure the 12 remote lists, got %d", result.lists)
+	}
 	if len(result.boundaries) == 0 {
 		t.Error("expected the sync to split its window")
 	}
@@ -95,8 +99,8 @@ func TestSyncRelayDownloadsWhatWeLackWindowByWindow(t *testing.T) {
 	}
 
 	again, err := local.syncRelay(context.Background(), wsURL(server), result.boundaries)
-	if err != nil || again.stored != 0 {
-		t.Errorf("a second sync must find nothing new, got %d stored, %v", again.stored, err)
+	if err != nil || again.stored != 0 || again.lists != 12 {
+		t.Errorf("a second sync must find nothing new and measure the same 12 lists, got %d stored, %d lists, %v", again.stored, again.lists, err)
 	}
 }
 
@@ -124,7 +128,12 @@ func newTestCrawler(t *testing.T) *Crawler {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
-	return &Crawler{store: store, relay: indexer.New(indexer.Config{MaxLimit: 100}, store), client: http.DefaultClient, log: log.New(io.Discard, "", 0)}
+	relays, err := registry.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(relays.Close)
+	return &Crawler{store: store, relay: indexer.New(indexer.Config{MaxLimit: 100}, store), registry: relays, client: http.DefaultClient, log: log.New(io.Discard, "", 0)}
 }
 
 func mustAdd(t *testing.T, c *Crawler, event nostr.Event) {

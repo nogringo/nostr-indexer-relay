@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore/lmdb"
 	"github.com/coder/websocket"
 
@@ -50,9 +51,9 @@ func TestProbeNIP77(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			url := fakeRelay(t, test.answers)
-			status, detail := probeNIP77(context.Background(), http.DefaultClient, url)
-			if status != test.wantStatus || detail != test.wantDetail {
-				t.Fatalf("got %q %q, want %q %q", status, detail, test.wantStatus, test.wantDetail)
+			result := probeNIP77(context.Background(), http.DefaultClient, url, false)
+			if result.status != test.wantStatus || result.detail != test.wantDetail {
+				t.Fatalf("got %q %q, want %q %q", result.status, result.detail, test.wantStatus, test.wantDetail)
 			}
 		})
 	}
@@ -64,11 +65,27 @@ func TestProbeNIP77OnOurOwnRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	for range 3 {
+		if err := store.SaveEvent(signedList(t, nostr.Generate(), nostr.Now(), "wss://relay.example.com")); err != nil {
+			t.Fatal(err)
+		}
+	}
 	server := httptest.NewServer(indexer.New(indexer.Config{MaxLimit: 10}, store))
 	defer server.Close()
 
-	if status, detail := probeNIP77(context.Background(), http.DefaultClient, wsURL(server)); status != registry.NIP77Supported {
-		t.Fatalf("got %q %q, want supported", status, detail)
+	if result := probeNIP77(context.Background(), http.DefaultClient, wsURL(server), true); result.status != registry.NIP77Supported || !result.counted || result.lists != 3 {
+		t.Fatalf("expected a supported relay counting 3 lists, got %+v", result)
+	}
+	if result := probeNIP77(context.Background(), http.DefaultClient, wsURL(server), false); result.counted {
+		t.Fatalf("expected no count when none was asked for, got %+v", result)
+	}
+}
+
+func TestProbeNIP77WithoutCount(t *testing.T) {
+	url := fakeRelay(t, []string{`["NEG-MSG","nip77-test","61"]`, `["CLOSED","count","unsupported: this relay does not support NIP-45"]`})
+
+	if result := probeNIP77(context.Background(), http.DefaultClient, url, true); result.status != registry.NIP77Supported || result.counted {
+		t.Fatalf("expected a supported relay without a count, got %+v", result)
 	}
 }
 
@@ -77,8 +94,8 @@ func TestProbeNIP77SilentRelayIsUnsupported(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	if status, _ := probeNIP77(ctx, http.DefaultClient, url); status != registry.NIP77Unsupported {
-		t.Fatalf("got %q, want unsupported", status)
+	if result := probeNIP77(ctx, http.DefaultClient, url, false); result.status != registry.NIP77Unsupported {
+		t.Fatalf("got %q, want unsupported", result.status)
 	}
 }
 
@@ -87,16 +104,16 @@ func TestProbeNIP77Unreachable(t *testing.T) {
 	url := wsURL(server)
 	server.Close()
 
-	if status, _ := probeNIP77(context.Background(), http.DefaultClient, url); status != registry.NIP77Unreachable {
-		t.Fatalf("got %q, want unreachable", status)
+	if result := probeNIP77(context.Background(), http.DefaultClient, url, false); result.status != registry.NIP77Unreachable {
+		t.Fatalf("got %q, want unreachable", result.status)
 	}
 }
 
 func TestProbeNIP77Forbidden(t *testing.T) {
 	url := fakeRelay(t, nil)
 
-	if status, _ := probeNIP77(context.Background(), newGuardedClient(), url); status != registry.NIP77Forbidden {
-		t.Fatalf("got %q, want forbidden", status)
+	if result := probeNIP77(context.Background(), newGuardedClient(), url, false); result.status != registry.NIP77Forbidden {
+		t.Fatalf("got %q, want forbidden", result.status)
 	}
 }
 

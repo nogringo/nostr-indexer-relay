@@ -72,6 +72,32 @@ func TestDueForSyncOnlyReturnsSupportedRelays(t *testing.T) {
 	}
 }
 
+func TestUpdateAllKeepsOnlyReportedChanges(t *testing.T) {
+	path := t.TempDir()
+	r := openTestRegistry(t, path)
+	if err := r.SetPopularity(map[string]int{"wss://a.example.com": 1, "wss://b.example.com": 2}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.UpdateAll(func(relay *Relay) bool {
+		relay.Live = true
+		return relay.URL == "wss://a.example.com"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if relays := r.All(); len(relays) != 2 {
+		t.Fatalf("expected 2 relays, got %+v", relays)
+	}
+	r.Close()
+
+	reopened := openTestRegistry(t, path)
+	if a, _ := reopened.Get("wss://a.example.com"); !a.Live {
+		t.Error("expected the reported change to be stored")
+	}
+	if b, _ := reopened.Get("wss://b.example.com"); b.Live {
+		t.Error("expected an unreported change to be dropped")
+	}
+}
+
 func TestRegistrySurvivesReopening(t *testing.T) {
 	path := t.TempDir()
 	r := openTestRegistry(t, path)
@@ -80,6 +106,7 @@ func TestRegistrySurvivesReopening(t *testing.T) {
 	}
 	if err := r.Update("wss://a.example.com", func(relay *Relay) {
 		relay.NIP77, relay.SyncInterval, relay.SyncBoundaries = NIP77Supported, time.Hour, []nostr.Timestamp{1700000000}
+		relay.Lists, relay.ListsSource, relay.Indexer, relay.Unique = 42, ListsSynced, true, 3
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +114,8 @@ func TestRegistrySurvivesReopening(t *testing.T) {
 
 	reopened := openTestRegistry(t, path)
 	relay, ok := reopened.Get("wss://a.example.com")
-	if !ok || relay.NIP77 != NIP77Supported || relay.Popularity != 2 || relay.SyncInterval != time.Hour || len(relay.SyncBoundaries) != 1 {
+	if !ok || relay.NIP77 != NIP77Supported || relay.Popularity != 2 || relay.SyncInterval != time.Hour || len(relay.SyncBoundaries) != 1 ||
+		relay.Lists != 42 || relay.ListsSource != ListsSynced || !relay.Indexer || relay.Unique != 3 {
 		t.Fatalf("expected the relay to survive reopening, got %+v", relay)
 	}
 }

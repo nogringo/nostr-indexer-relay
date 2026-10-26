@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"fiatjaf.com/nostr/eventstore"
@@ -46,6 +47,10 @@ type Crawler struct {
 	seeds        []string
 	allowedPorts []int
 	log          *log.Logger
+
+	// Whether our index is filled enough for shares of it to mean something.
+	filled        atomic.Bool
+	contributions contributions
 }
 
 // New returns a crawler that stores what it fetches through relay, so that fetched lists
@@ -61,8 +66,8 @@ func New(store eventstore.Store, relay *khatru.Relay, registry *registry.Registr
 	}
 }
 
-// Run discovers relays from the stored lists, tests their NIP-77 support and syncs from
-// the ones that pass, until ctx is done.
+// Run discovers relays from the stored lists, tests their NIP-77 support, syncs from the
+// ones that pass and follows the indexers live, until ctx is done.
 func (c *Crawler) Run(ctx context.Context) {
 	c.discover(ctx)
 
@@ -74,6 +79,7 @@ func (c *Crawler) Run(ctx context.Context) {
 	})
 	wg.Go(func() { c.testRelays(ctx) })
 	wg.Go(func() { c.syncRelays(ctx) })
+	wg.Go(func() { c.followRelays(ctx) })
 	wg.Wait()
 }
 
@@ -100,14 +106,20 @@ func (c *Crawler) testRelays(ctx context.Context) {
 		var wg sync.WaitGroup
 		for _, relay := range due {
 			wg.Go(func() {
-				status, detail := probeNIP77(ctx, c.client, relay.URL)
+				result := probeNIP77(ctx, c.client, relay.URL, relay.ListsSource != registry.ListsSynced)
 				if ctx.Err() != nil {
 					return
 				}
-				if status == registry.NIP77Supported {
+				if result.status == registry.NIP77Supported {
 					c.log.Printf("%s supports NIP-77", relay.URL)
 				}
-				if err := c.registry.Update(relay.URL, func(r *registry.Relay) { recordTest(r, status, detail, time.Now()) }); err != nil {
+				now := time.Now()
+				if err := c.registry.Update(relay.URL, func(r *registry.Relay) {
+					recordTest(r, result.status, result.detail, now)
+					if result.counted && r.ListsSource != registry.ListsSynced {
+						r.Lists, r.ListsSource, r.ListsAt = result.lists, registry.ListsCounted, now
+					}
+				}); err != nil {
 					c.log.Printf("failed to record the test of %s: %v", relay.URL, err)
 				}
 			})
@@ -163,16 +175,11 @@ func (c *Crawler) syncOne(ctx context.Context, relay registry.Relay) {
 	var connect *connectError
 	if errors.As(err, &connect) {
 		c.log.Printf("sync of %s could not connect, handing it back to the tester: %v", relay.URL, err)
-		// The tester's backoff decides when the relay is worth another try.
-		status := registry.NIP77Unreachable
-		if errors.Is(err, errForbiddenAddress) {
-			status = registry.NIP77Forbidden
-		}
-		update = func(r *registry.Relay) { recordTest(r, status, err.Error(), now) }
+		update = func(r *registry.Relay) { handBack(r, err, now) }
 	} else if err != nil {
 		c.log.Printf("sync of %s failed after %d new lists: %v", relay.URL, result.stored, err)
 	} else {
-		c.log.Printf("synced %s: %d new lists, %d windows", relay.URL, result.stored, len(result.boundaries)+1)
+		c.log.Printf("synced %s: %d new lists, %d windows, %d lists held", relay.URL, result.stored, len(result.boundaries)+1, result.lists)
 	}
 	if err := c.registry.Update(relay.URL, update); err != nil {
 		c.log.Printf("failed to record the sync of %s: %v", relay.URL, err)
@@ -200,11 +207,23 @@ func recordTest(relay *registry.Relay, status registry.NIP77Status, detail strin
 	}
 }
 
+// handBack records a relay that could not be reached as a failed test, so that the tester's
+// backoff decides when it is worth another try.
+func handBack(relay *registry.Relay, err error, now time.Time) {
+	status := registry.NIP77Unreachable
+	if errors.Is(err, errForbiddenAddress) {
+		status = registry.NIP77Forbidden
+	}
+	recordTest(relay, status, err.Error(), now)
+}
+
 func recordSync(relay *registry.Relay, result syncResult, err error, now time.Time) {
 	relay.SyncedAt, relay.LastSyncNew, relay.SyncBoundaries = now, result.stored, result.boundaries
 	relay.SyncDetail = ""
 	if err != nil {
 		relay.SyncDetail = err.Error()
+	} else {
+		relay.Lists, relay.ListsSource, relay.ListsAt = result.lists, registry.ListsSynced, now
 	}
 	relay.SyncInterval = nextSyncInterval(relay.SyncInterval, result.stored)
 	relay.NextSyncAt = now.Add(relay.SyncInterval)
