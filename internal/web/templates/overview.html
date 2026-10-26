@@ -1,0 +1,39 @@
+{{define "content"}}<section class="summary">
+<h1 class="headline"><span class="figure">{{number .Lists}}</span> pubkeys indexed</h1>
+<p class="lede">Following {{number .Live}} relays live, {{number (len .Indexers)}} of them detected as indexers. {{number .Supported}} of the {{number .Tracked}} relays found in stored lists support NIP-77.</p>
+</section>
+
+<section>
+<h2>Lists stored per day</h2>
+<p class="note">New or updated relay lists, published to this relay or fetched by the crawler, over the last {{len .Chart.Days}} days (UTC).{{with .Chart.Peak}} The busiest day was {{.Day}}, with {{number .Lists}} lists.{{end}}</p>
+<figure class="chart">
+<svg viewBox="0 0 {{.Chart.Width}} {{.Chart.Height}}" preserveAspectRatio="none" role="img" aria-label="Lists stored per day, from {{.Chart.First}} to {{.Chart.Last}}">
+{{range .Chart.Bars}}<g class="column"><title>{{.Day}}: {{number .Lists}} lists</title><rect class="hit" x="{{.SlotX}}" y="0" width="{{.SlotWidth}}" height="{{$.Chart.Height}}"></rect>{{if .Path}}<path d="{{.Path}}"></path>{{end}}</g>
+{{end}}</svg>
+<figcaption class="axis"><span>{{.Chart.First}}</span><span>{{.Chart.Last}}</span></figcaption>
+</figure>
+<details>
+<summary>Show the numbers</summary>
+<table class="compact">
+<thead><tr><th>Day</th><th class="num">Lists stored</th></tr></thead>
+<tbody>{{range .Chart.Days}}<tr><td>{{.Day.Format "Mon, Jan 2"}}</td><td class="num">{{number .Lists}}</td></tr>{{end}}</tbody>
+</table>
+</details>
+</section>
+
+<section>
+<h2>Indexers</h2>
+{{if .Indexers}}<div class="table-scroll">
+<table>
+<thead><tr><th>Relay</th><th class="num">Lists held</th><th>Measured</th><th>Live</th></tr></thead>
+<tbody>{{range .Indexers}}<tr>
+<td class="url">{{.URL}}{{if .Seed}} <span class="tag">seed</span>{{end}}</td>
+<td class="num">{{if .ListsSource}}{{number .Lists}}{{else}}<span class="muted">not yet</span>{{end}}</td>
+<td>{{if eq .ListsSource "sync"}}by sync, {{ago .ListsAt}}{{else if eq .ListsSource "count"}}by COUNT, {{ago .ListsAt}}{{else}}<span class="muted">seed, counted as an indexer until measured</span>{{end}}</td>
+<td>{{if .Live}}<span class="good">live</span>{{else}}<span class="muted">not live</span>{{end}}</td>
+</tr>{{end}}</tbody>
+</table>
+</div>
+{{else}}<p class="note">No indexer yet. The crawler counts the seeds as indexers once their NIP-77 test passes.</p>{{end}}
+</section>
+{{end}}

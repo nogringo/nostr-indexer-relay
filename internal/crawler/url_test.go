@@ -3,6 +3,8 @@ package crawler
 import (
 	"strings"
 	"testing"
+
+	"nostr-indexer-relay/internal/registry"
 )
 
 func TestNormalizeRelayURL(t *testing.T) {
@@ -17,8 +19,8 @@ func TestNormalizeRelayURL(t *testing.T) {
 		"wss://[2606:4700::1111]":           "wss://[2606:4700::1111]",
 	}
 	for raw, want := range accepted {
-		if got, err := normalizeRelayURL(raw, nil); err != nil || got != want {
-			t.Errorf("normalizeRelayURL(%q) = %q, %v; want %q", raw, got, err, want)
+		if got, err := NormalizeRelayURL(raw, nil); err != nil || got != want {
+			t.Errorf("NormalizeRelayURL(%q) = %q, %v; want %q", raw, got, err, want)
 		}
 	}
 
@@ -43,22 +45,22 @@ func TestNormalizeRelayURL(t *testing.T) {
 		"wss://relay.example.com/" + strings.Repeat("a", maxRelayURLLength),
 	}
 	for _, raw := range rejected {
-		if got, err := normalizeRelayURL(raw, nil); err == nil {
-			t.Errorf("normalizeRelayURL(%q) = %q; want an error", raw, got)
+		if got, err := NormalizeRelayURL(raw, nil); err == nil {
+			t.Errorf("NormalizeRelayURL(%q) = %q; want an error", raw, got)
 		}
 	}
 }
 
 func TestNormalizeRelayURLAllowsListedPorts(t *testing.T) {
-	got, err := normalizeRelayURL("wss://relay.example.com:7777/", []int{7777})
+	got, err := NormalizeRelayURL("wss://relay.example.com:7777/", []int{7777})
 	if err != nil || got != "wss://relay.example.com:7777" {
 		t.Fatalf("got %q, %v", got, err)
 	}
 }
 
 func TestDefaultSeedsAreNormalized(t *testing.T) {
-	for _, seed := range defaultSeeds {
-		if got, err := normalizeRelayURL(seed, nil); err != nil || got != seed {
+	for _, seed := range registry.DefaultSettings().Seeds {
+		if got, err := NormalizeRelayURL(seed, nil); err != nil || got != seed {
 			t.Errorf("seed %s normalizes to %q, %v", seed, got, err)
 		}
 	}

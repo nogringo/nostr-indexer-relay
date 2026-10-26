@@ -11,7 +11,7 @@ This project is a relay that stores only relay lists, fills itself by crawling t
 ## Scope
 
 - Only kind 10002 is stored. Every other kind is rejected with `blocked: only kind 10002 relay lists are accepted`.
-- Kind 10002 is replaceable: one version per pubkey, the newest wins, whatever the order of arrival.
+- Kind 10002 is replaceable: one version per pubkey, the newest wins, whatever the order of arrival. A list older than ours, or one we already have, is acknowledged as a duplicate: nothing is stored, broadcast or counted.
 - No event is ever served unless its id and signature were verified. This holds for events published directly and for events fetched by the crawler.
 - `created_at` is not checked.
 - A stored event is at most 128 KB, whatever its path: direct publication, where the max message size enforces it, or the crawler, which applies the same limit. Its content is at most 64 KB, a limit of the LMDB storage format.
@@ -135,11 +135,14 @@ The crawler connects to URLs taken from untrusted events.
 
 The interface is embedded in the binary and served on the same port as the relay. khatru answers WebSocket upgrades and `Accept: application/nostr+json` (NIP-11); every other HTTP request goes to the web interface.
 
+Pages are rendered on the server, with a single script for NIP-07 signing. They load nothing from other sites, and a content security policy holds them to that.
+
 ### Admin (`/admin`)
 
-- Dashboard: indexed pubkeys, 10002 received per day, active live subscriptions, detected indexers.
-- Relay registry: for each relay its NIP-77 status, activity, unique contribution, and live state. Actions: rerun the test, force a sync, ban the relay, force live.
-- Settings: seeds, live cap, thresholds, allowed ports, and the switch for the visitor interface. Settings are stored in the database, so nothing has to be configured through files.
+- Dashboard: indexed pubkeys, new or updated 10002 stored per day (UTC, last 30 days, from publications and from the crawler), active live subscriptions, detected indexers.
+- Relay registry: for each relay its NIP-77 status, activity, unique contribution, and live state, filtered by state and searched by URL, 100 relays per page. Actions: rerun the test, force a sync, ban the relay, force live.
+- A banned relay is no longer tested, synced or followed live. A relay forced live is followed whether it is an indexer or not, outside the live cap, as long as its NIP-77 test passed. The crawler picks up an action within a minute.
+- Settings: seeds, allowed ports, the indexer threshold, the live cap and the days before a quiet relay stops being followed live. The switch for the visitor interface comes with that interface. Settings are stored in the database, so nothing has to be configured through files. A change starts a discovery right away, so that new seeds and ports apply.
 
 ### Visitors (`/`, can be turned off)
 
@@ -153,13 +156,15 @@ When the admin turns the visitor interface off, the relay, NIP-11 and the admin 
 ### Admin authentication
 
 - The admin is a pubkey and logs in by signing with NIP-07. The server then issues a session cookie.
-- On first start with no admin, the binary logs a one-time setup link. Whoever opens it and signs becomes the admin.
-- `RELAY_ADMIN_PUBKEY` sets the admin in advance, for automated deployments.
+- The signed event is a NIP-98 HTTP auth event (kind 27235) naming the login URL and `POST`. It must be at most a minute off and works once.
+- The session cookie holds the admin pubkey and an expiry 30 days out, signed with a key kept in the state database. It is `HttpOnly` and `SameSite=Strict`, and requests sent from another origin are refused.
+- On first start with no admin, the binary logs a one-time setup link. Whoever opens it and signs becomes the admin. While there is no admin, each start logs a new link.
+- `RELAY_ADMIN_PUBKEY` (npub or hex) sets the admin in advance, for automated deployments. It takes precedence over an admin claimed through the setup link.
 
 ## Storage
 
 - Events: LMDB, through `fiatjaf.com/nostr/eventstore/lmdb`.
-- Crawler state and settings: LMDB too, in a separate environment (`RELAY_STATE_PATH`, `./data/state` by default). The registry is held in memory and every change is written through.
+- Crawler state and settings: LMDB too, in a separate environment (`RELAY_STATE_PATH`, `./data/state` by default). The registry is held in memory and every change is written through. The same environment keeps the settings, the admin pubkey, the session key and the lists stored per day, the last written at most once a minute.
 
 The LMDB backend allocates for the whole limit of a query up front, so every full read of the index (discovery, negentropy vectors, negentropy sessions served to peers) goes through a paged scan, 5000 events at a time. When more than 5000 lists share one `created_at`, the rest of that second is skipped.
 
@@ -180,7 +185,7 @@ Negentropy sessions served to peers:
 2. Relay registry, SSRF-safe dialer, NIP-77 test. Done.
 3. Negentropy crawler: discovery, adaptive revisit, health, full-index negentropy serving. Done.
 4. Indexer detection and live subscriptions. Done.
-5. Admin interface and authentication.
+5. Admin interface and authentication. Done.
 6. Visitor interface.
 
 ## Open questions

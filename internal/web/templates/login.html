@@ -1,0 +1,23 @@
+{{define "content"}}<section class="signin">
+{{if .Setup}}
+<h1>Become the admin of {{.Relay}}</h1>
+{{if .HasAdmin}}
+<p>This relay already has an admin. <a href="/admin">Sign in</a> with the admin key instead.</p>
+{{else if .TokenValid}}
+<p>Whoever signs here becomes the admin of this relay. The link works once.</p>
+<button class="primary" data-sign-in data-token="{{.Token}}">Sign with my Nostr extension</button>
+{{else}}
+<p>This setup link is no longer valid. While the relay has no admin, it logs a new link each time it starts.</p>
+{{end}}
+{{else}}
+<h1>Sign in to {{.Relay}}</h1>
+{{if .HasAdmin}}
+<p>Sign with the admin key, through a browser extension that supports <span class="nowrap">NIP-07</span>.</p>
+<button class="primary" data-sign-in>Sign in with my Nostr extension</button>
+{{else}}
+<p>This relay has no admin yet. Open the setup link from the relay's log to claim it.</p>
+{{end}}
+{{end}}
+<p class="sign-in-status" data-sign-in-status role="status"></p>
+</section>
+{{end}}

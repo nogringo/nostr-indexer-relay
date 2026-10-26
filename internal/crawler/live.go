@@ -14,9 +14,6 @@ import (
 
 const (
 	liveCheckInterval = time.Minute
-	liveCap           = 50
-	// A non-indexer that brings no list the indexers miss for this long loses its live subscription.
-	liveQuietPeriod = 7 * 24 * time.Hour
 	// A new list often reaches several relays at once, so an indexer has this long to deliver
 	// it too before it counts as unique to the non-indexer that delivered it first.
 	uniqueGrace = time.Minute
@@ -54,7 +51,7 @@ func (c *Crawler) followRelays(ctx context.Context) {
 		now := time.Now()
 		c.classify()
 		c.credit(now)
-		want := liveRelays(c.registry.All(), now, liveCap)
+		want := liveRelays(c.registry.All(), now, c.registry.Settings())
 
 		for url, subscription := range subscriptions {
 			select {
@@ -86,24 +83,28 @@ func (c *Crawler) followRelays(ctx context.Context) {
 	}
 }
 
-// liveRelays returns the relays to follow live: every indexer, and the n non-indexers that
-// brought the most lists the indexers missed, as long as their last one is recent.
-func liveRelays(relays []registry.Relay, now time.Time, n int) map[string]bool {
+// liveRelays returns the relays to follow live: the ones the admin forced, every indexer, and
+// the non-indexers, up to the live cap, that brought the most lists the indexers missed, as
+// long as their last one is recent.
+func liveRelays(relays []registry.Relay, now time.Time, settings registry.Settings) map[string]bool {
 	want := make(map[string]bool)
 	var contributors []registry.Relay
 	for _, relay := range relays {
 		switch {
-		case relay.NIP77 != registry.NIP77Supported || relay.Forgotten():
+		case relay.NIP77 != registry.NIP77Supported || relay.Banned:
+		case relay.ForceLive:
+			want[relay.URL] = true
+		case relay.Forgotten():
 		case relay.Indexer:
 			want[relay.URL] = true
-		case relay.Unique > 0 && now.Sub(relay.UniqueAt) < liveQuietPeriod:
+		case relay.Unique > 0 && now.Sub(relay.UniqueAt) < settings.LiveQuietPeriod:
 			contributors = append(contributors, relay)
 		}
 	}
 	slices.SortFunc(contributors, func(a, b registry.Relay) int {
 		return cmp.Or(cmp.Compare(b.Unique, a.Unique), strings.Compare(a.URL, b.URL))
 	})
-	for _, relay := range contributors[:min(n, len(contributors))] {
+	for _, relay := range contributors[:min(settings.LiveCap, len(contributors))] {
 		want[relay.URL] = true
 	}
 	return want

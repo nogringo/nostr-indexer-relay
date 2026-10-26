@@ -30,7 +30,7 @@ func mentionedRelays(event nostr.Event, allowedPorts []int) []string {
 		if len(tag) < 2 || tag[0] != "r" {
 			continue
 		}
-		if url, err := normalizeRelayURL(tag[1], allowedPorts); err == nil && !slices.Contains(urls, url) {
+		if url, err := NormalizeRelayURL(tag[1], allowedPorts); err == nil && !slices.Contains(urls, url) {
 			urls = append(urls, url)
 		}
 	}

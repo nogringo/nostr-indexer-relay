@@ -57,6 +57,32 @@ func TestRelayKeepsNewestListWhateverTheArrivalOrder(t *testing.T) {
 	}
 }
 
+func TestRelayReportsOlderAndKnownListsAsDuplicates(t *testing.T) {
+	relay := New(testConfig(), newTestStore(t))
+	saved := 0
+	relay.OnEventSaved = func(context.Context, nostr.Event) { saved++ }
+	ctx := context.Background()
+
+	newer := relayList(t, skA, 2000, "wss://new.example.com")
+	for _, test := range []struct {
+		name          string
+		event         nostr.Event
+		wantDuplicate bool
+	}{
+		{"new", newer, false},
+		{"known", newer, true},
+		{"older", relayList(t, skA, 1000, "wss://old.example.com"), true},
+	} {
+		duplicate, err := relay.AddEvent(ctx, test.event)
+		if err != nil || duplicate != test.wantDuplicate {
+			t.Errorf("%s list: got duplicate %v, %v", test.name, duplicate, err)
+		}
+	}
+	if saved != 1 {
+		t.Errorf("expected OnEventSaved for the new list only, got %d calls", saved)
+	}
+}
+
 func TestRelayServesLargeAuthorsFilter(t *testing.T) {
 	relay := New(testConfig(), newTestStore(t))
 	ctx := context.Background()

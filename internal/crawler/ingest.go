@@ -21,12 +21,8 @@ func (c *Crawler) ingest(ctx context.Context, event nostr.Event) bool {
 	if !event.CheckID() || !event.VerifySignature() {
 		return false
 	}
-	for current := range c.store.QueryEvents(nostr.Filter{Kinds: relayListsFilter.Kinds, Authors: []nostr.PubKey{event.PubKey}}, 1) {
-		if !nostr.IsOlder(current, event) {
-			return false
-		}
-	}
-	if _, err := c.relay.AddEvent(ctx, event); err != nil {
+	// An older list, or one we have, is skipped as a duplicate.
+	if duplicate, err := c.relay.AddEvent(ctx, event); duplicate || err != nil {
 		return false
 	}
 	c.relay.BroadcastEvent(event)

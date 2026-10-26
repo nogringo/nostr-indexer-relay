@@ -1,0 +1,25 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} | {{.Relay}}</title>
+<link rel="stylesheet" href="/admin/static/admin.css">
+<script src="/admin/static/admin.js" defer></script>
+</head>
+<body>
+{{if .SignedIn}}<header class="bar">
+<a class="name" href="/admin">{{.Relay}}</a>
+<nav aria-label="Admin">
+<a href="/admin"{{if eq .Nav "overview"}} aria-current="page"{{end}}>Overview</a>
+<a href="/admin/relays"{{if eq .Nav "relays"}} aria-current="page"{{end}}>Relays</a>
+<a href="/admin/settings"{{if eq .Nav "settings"}} aria-current="page"{{end}}>Settings</a>
+</nav>
+<form method="post" action="/admin/logout"><button class="quiet">Sign out</button></form>
+</header>
+{{end}}<main>
+{{template "content" .}}
+</main>
+</body>
+</html>
+{{end}}

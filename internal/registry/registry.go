@@ -62,6 +62,10 @@ type Relay struct {
 	Unique   int       `json:"unique,omitempty"`
 	UniqueAt time.Time `json:"unique_at,omitzero"`
 	Live     bool      `json:"live,omitempty"`
+
+	// Set by the admin.
+	Banned    bool `json:"banned,omitempty"`
+	ForceLive bool `json:"force_live,omitempty"`
 }
 
 // Forgotten reports whether the relay is no seed and no stored list mentions it any more.
@@ -69,13 +73,22 @@ func (relay Relay) Forgotten() bool {
 	return !relay.Seed && relay.Popularity == 0
 }
 
-// Registry keeps every relay in memory and writes each change through to LMDB.
+// Registry keeps every relay, the settings and the daily stats in memory, and writes each
+// change through to LMDB. Stats are written at most once per statsFlushInterval.
 type Registry struct {
-	env *lmdb.Env
-	dbi lmdb.DBI
+	env      *lmdb.Env
+	dbi      lmdb.DBI
+	settings lmdb.DBI
+	stats    lmdb.DBI
 
 	mu     sync.Mutex
 	relays map[string]*Relay
+	config storedSettings
+
+	statsMu   sync.Mutex
+	stored    map[string]int
+	unflushed map[string]bool
+	flushedAt time.Time
 }
 
 func Open(path string) (*Registry, error) {
@@ -87,16 +100,22 @@ func Open(path string) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	env.SetMaxDBs(1)
+	env.SetMaxDBs(3)
 	env.SetMapSize(1 << 30)
 	if err := env.Open(path, lmdb.NoTLS, 0644); err != nil {
 		env.Close()
 		return nil, err
 	}
 
-	r := &Registry{env: env, relays: make(map[string]*Relay)}
+	r := &Registry{env: env, relays: make(map[string]*Relay), stored: make(map[string]int), unflushed: make(map[string]bool)}
 	if err := env.Update(func(txn *lmdb.Txn) (err error) {
-		r.dbi, err = txn.OpenDBI("relays", lmdb.Create)
+		if r.dbi, err = txn.OpenDBI("relays", lmdb.Create); err != nil {
+			return err
+		}
+		if r.settings, err = txn.OpenDBI("settings", lmdb.Create); err != nil {
+			return err
+		}
+		r.stats, err = txn.OpenDBI("stats", lmdb.Create)
 		return err
 	}); err != nil {
 		env.Close()
@@ -110,10 +129,19 @@ func Open(path string) (*Registry, error) {
 }
 
 func (r *Registry) Close() {
+	r.statsMu.Lock()
+	r.flushStats()
+	r.statsMu.Unlock()
 	r.env.Close()
 }
 
 func (r *Registry) load() error {
+	if err := r.loadSettings(); err != nil {
+		return err
+	}
+	if err := r.loadStats(); err != nil {
+		return err
+	}
 	return r.env.View(func(txn *lmdb.Txn) error {
 		cursor, err := txn.OpenCursor(r.dbi)
 		if err != nil {
@@ -186,7 +214,7 @@ func (r *Registry) SetPopularity(counts map[string]int, seeds []string) error {
 }
 
 // Due returns up to n relays whose next test is due, seeds first, then the most popular.
-// Relays that no list mentions any more are left alone.
+// Banned relays, and relays that no list mentions any more, are left alone.
 func (r *Registry) Due(now time.Time, n int) []Relay {
 	return r.due(n, func(relay *Relay) bool { return !relay.NextTestAt.After(now) })
 }
@@ -204,7 +232,7 @@ func (r *Registry) due(n int, isDue func(*Relay) bool) []Relay {
 
 	var due []Relay
 	for _, relay := range r.relays {
-		if !relay.Forgotten() && isDue(relay) {
+		if !relay.Forgotten() && !relay.Banned && isDue(relay) {
 			due = append(due, *relay)
 		}
 	}

@@ -55,7 +55,7 @@ func TestIsIndexer(t *testing.T) {
 		{"empty relay and empty index", measured(false, 0, registry.ListsSynced), 0, true, false},
 	}
 	for _, test := range tests {
-		if got := isIndexer(test.relay, test.ours, test.filled); got != test.want {
+		if got := isIndexer(test.relay, test.ours, test.filled, 0.5); got != test.want {
 			t.Errorf("%s: got %v, want %v", test.name, got, test.want)
 		}
 	}
@@ -74,12 +74,15 @@ func TestLiveRelays(t *testing.T) {
 		supported("wss://big.example.com", false, 30, recent),
 		supported("wss://middle.example.com", false, 10, recent),
 		supported("wss://small.example.com", false, 2, recent),
-		supported("wss://quiet.example.com", false, 100, now.Add(-liveQuietPeriod)),
+		supported("wss://quiet.example.com", false, 100, now.Add(-7*24*time.Hour)),
 		supported("wss://nothing.example.com", false, 0, time.Time{}),
+		{URL: "wss://banned.example.com", Popularity: 1, NIP77: registry.NIP77Supported, Indexer: true, Banned: true},
+		{URL: "wss://forced.example.com", NIP77: registry.NIP77Supported, ForceLive: true},
 	}
 
-	got := slices.Sorted(maps.Keys(liveRelays(relays, now, 2)))
-	want := []string{"wss://big.example.com", "wss://indexer.example.com", "wss://middle.example.com"}
+	settings := registry.Settings{LiveCap: 2, LiveQuietPeriod: 7 * 24 * time.Hour}
+	got := slices.Sorted(maps.Keys(liveRelays(relays, now, settings)))
+	want := []string{"wss://big.example.com", "wss://forced.example.com", "wss://indexer.example.com", "wss://middle.example.com"}
 	if !slices.Equal(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}

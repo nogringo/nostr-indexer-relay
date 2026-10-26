@@ -31,22 +31,13 @@ const (
 	maxSyncInterval   = 24 * time.Hour
 )
 
-var defaultSeeds = []string{
-	"wss://indexer.coracle.social",
-	"wss://relay.ditto.pub",
-	"wss://relay.nos.social",
-	"wss://directory.yabu.me",
-	"wss://profiles.nostr1.com",
-}
-
 type Crawler struct {
-	store        eventstore.Store
-	relay        *khatru.Relay
-	registry     *registry.Registry
-	client       *http.Client
-	seeds        []string
-	allowedPorts []int
-	log          *log.Logger
+	store      eventstore.Store
+	relay      *khatru.Relay
+	registry   *registry.Registry
+	client     *http.Client
+	log        *log.Logger
+	rediscover chan struct{}
 
 	// Whether our index is filled enough for shares of it to mean something.
 	filled        atomic.Bool
@@ -57,12 +48,21 @@ type Crawler struct {
 // take the same path as published ones.
 func New(store eventstore.Store, relay *khatru.Relay, registry *registry.Registry, logger *log.Logger) *Crawler {
 	return &Crawler{
-		store:    store,
-		relay:    relay,
-		registry: registry,
-		client:   newGuardedClient(),
-		seeds:    defaultSeeds,
-		log:      logger,
+		store:      store,
+		relay:      relay,
+		registry:   registry,
+		client:     newGuardedClient(),
+		log:        logger,
+		rediscover: make(chan struct{}, 1),
+	}
+}
+
+// Rediscover runs a discovery without waiting for the next one, so that new seeds and
+// allowed ports apply right away.
+func (c *Crawler) Rediscover() {
+	select {
+	case c.rediscover <- struct{}{}:
+	default:
 	}
 }
 
@@ -73,8 +73,18 @@ func (c *Crawler) Run(ctx context.Context) {
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		for sleep(ctx, discoveryInterval) {
+		timer := time.NewTimer(discoveryInterval)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+			case <-c.rediscover:
+				timer.Stop()
+			}
 			c.discover(ctx)
+			timer.Reset(discoveryInterval)
 		}
 	})
 	wg.Go(func() { c.testRelays(ctx) })
@@ -84,11 +94,12 @@ func (c *Crawler) Run(ctx context.Context) {
 }
 
 func (c *Crawler) discover(ctx context.Context) {
-	counts, err := countRelayMentions(ctx, c.store, c.allowedPorts)
+	settings := c.registry.Settings()
+	counts, err := countRelayMentions(ctx, c.store, settings.AllowedPorts)
 	if err != nil {
 		return
 	}
-	if err := c.registry.SetPopularity(counts, c.seeds); err != nil {
+	if err := c.registry.SetPopularity(counts, settings.Seeds); err != nil {
 		c.log.Printf("failed to store relay popularity: %v", err)
 		return
 	}

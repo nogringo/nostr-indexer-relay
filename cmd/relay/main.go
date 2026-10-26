@@ -9,12 +9,15 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore/lmdb"
 
 	"nostr-indexer-relay/internal/crawler"
 	"nostr-indexer-relay/internal/registry"
 	indexer "nostr-indexer-relay/internal/relay"
+	"nostr-indexer-relay/internal/web"
 )
 
 func main() {
@@ -45,6 +48,23 @@ func run() error {
 	defer stop()
 
 	relay := indexer.New(cfg, store)
+	relay.OnEventSaved = func(context.Context, nostr.Event) { relays.CountStored(time.Now()) }
+	crawl := crawler.New(store, relay, relays, log.New(os.Stderr, "[crawler] ", log.LstdFlags))
+
+	admin := web.New(web.Config{
+		Name:            cfg.Name,
+		PublicURL:       cfg.RelayURL,
+		Store:           store,
+		Registry:        relays,
+		AdminPubKey:     cfg.AdminPubKey,
+		SettingsChanged: crawl.Rediscover,
+		Log:             log.New(os.Stderr, "[admin] ", log.LstdFlags),
+	})
+	admin.Register(relay.Router())
+	if link, ok := admin.SetupLink(web.BaseURL(cfg.RelayURL, cfg.Addr)); ok {
+		log.Printf("no admin yet: open %s and sign to become the admin", link)
+	}
+
 	server := &http.Server{Addr: cfg.Addr, Handler: relay}
 	go func() {
 		<-ctx.Done()
@@ -54,7 +74,7 @@ func run() error {
 	crawlerDone := make(chan struct{})
 	go func() {
 		defer close(crawlerDone)
-		crawler.New(store, relay, relays, log.New(os.Stderr, "[crawler] ", log.LstdFlags)).Run(ctx)
+		crawl.Run(ctx)
 	}()
 
 	log.Printf("nostr indexer relay listening on %s", cfg.Addr)

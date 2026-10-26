@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/nip19"
 )
 
 const (
@@ -27,6 +29,7 @@ type Config struct {
 	Icon        string
 	Contact     string
 	PubKey      *nostr.PubKey
+	AdminPubKey *nostr.PubKey
 	LMDBPath    string
 	StatePath   string
 	MaxLimit    int
@@ -66,7 +69,30 @@ func LoadConfig() (Config, error) {
 		cfg.PubKey = &pubkey
 	}
 
+	if raw := os.Getenv("RELAY_ADMIN_PUBKEY"); raw != "" {
+		admin, err := parsePubKey(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("RELAY_ADMIN_PUBKEY must be an npub or a 64-character hex nostr pubkey: %w", err)
+		}
+		cfg.AdminPubKey = &admin
+	}
+
 	return cfg, nil
+}
+
+func parsePubKey(raw string) (nostr.PubKey, error) {
+	if !strings.HasPrefix(raw, "npub1") {
+		return nostr.PubKeyFromHex(raw)
+	}
+	prefix, value, err := nip19.Decode(raw)
+	if err != nil {
+		return nostr.PubKey{}, err
+	}
+	pubkey, ok := value.(nostr.PubKey)
+	if prefix != "npub" || !ok {
+		return nostr.PubKey{}, fmt.Errorf("not an npub")
+	}
+	return pubkey, nil
 }
 
 func envOrDefault(name string, fallback string) string {
