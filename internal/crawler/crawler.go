@@ -2,12 +2,14 @@ package crawler
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"sync"
 	"time"
 
 	"fiatjaf.com/nostr/eventstore"
+	"fiatjaf.com/nostr/khatru"
 
 	"nostr-indexer-relay/internal/registry"
 )
@@ -20,6 +22,12 @@ const (
 	deadRetestInterval = 30 * 24 * time.Hour
 	firstBackoff       = time.Hour
 	deadAfterFailures  = 8
+
+	syncWorkers       = 4
+	syncIdleWait      = 10 * time.Second
+	minSyncInterval   = 10 * time.Minute
+	firstSyncInterval = time.Hour
+	maxSyncInterval   = 24 * time.Hour
 )
 
 var defaultSeeds = []string{
@@ -32,6 +40,7 @@ var defaultSeeds = []string{
 
 type Crawler struct {
 	store        eventstore.Store
+	relay        *khatru.Relay
 	registry     *registry.Registry
 	client       *http.Client
 	seeds        []string
@@ -39,9 +48,12 @@ type Crawler struct {
 	log          *log.Logger
 }
 
-func New(store eventstore.Store, registry *registry.Registry, logger *log.Logger) *Crawler {
+// New returns a crawler that stores what it fetches through relay, so that fetched lists
+// take the same path as published ones.
+func New(store eventstore.Store, relay *khatru.Relay, registry *registry.Registry, logger *log.Logger) *Crawler {
 	return &Crawler{
 		store:    store,
+		relay:    relay,
 		registry: registry,
 		client:   newGuardedClient(),
 		seeds:    defaultSeeds,
@@ -49,7 +61,8 @@ func New(store eventstore.Store, registry *registry.Registry, logger *log.Logger
 	}
 }
 
-// Run discovers relays from the stored lists and tests their NIP-77 support until ctx is done.
+// Run discovers relays from the stored lists, tests their NIP-77 support and syncs from
+// the ones that pass, until ctx is done.
 func (c *Crawler) Run(ctx context.Context) {
 	c.discover(ctx)
 
@@ -60,11 +73,12 @@ func (c *Crawler) Run(ctx context.Context) {
 		}
 	})
 	wg.Go(func() { c.testRelays(ctx) })
+	wg.Go(func() { c.syncRelays(ctx) })
 	wg.Wait()
 }
 
 func (c *Crawler) discover(ctx context.Context) {
-	counts, err := countRelayMentions(ctx, c.store, c.allowedPorts, scanPageSize)
+	counts, err := countRelayMentions(ctx, c.store, c.allowedPorts)
 	if err != nil {
 		return
 	}
@@ -102,6 +116,69 @@ func (c *Crawler) testRelays(ctx context.Context) {
 	}
 }
 
+func (c *Crawler) syncRelays(ctx context.Context) {
+	var mu sync.Mutex
+	inFlight := make(map[string]bool)
+	next := func() (registry.Relay, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, relay := range c.registry.DueForSync(time.Now(), syncWorkers) {
+			if !inFlight[relay.URL] {
+				inFlight[relay.URL] = true
+				return relay, true
+			}
+		}
+		return registry.Relay{}, false
+	}
+
+	var wg sync.WaitGroup
+	for range syncWorkers {
+		wg.Go(func() {
+			for ctx.Err() == nil {
+				relay, ok := next()
+				if !ok {
+					sleep(ctx, syncIdleWait)
+					continue
+				}
+				c.syncOne(ctx, relay)
+				mu.Lock()
+				delete(inFlight, relay.URL)
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+}
+
+func (c *Crawler) syncOne(ctx context.Context, relay registry.Relay) {
+	result, err := c.syncRelay(ctx, relay.URL, relay.SyncBoundaries)
+	if ctx.Err() != nil {
+		// Shutting down: keep the windows learned so far, but leave the schedule alone.
+		c.registry.Update(relay.URL, func(r *registry.Relay) { r.SyncBoundaries = result.boundaries })
+		return
+	}
+	now := time.Now()
+
+	update := func(r *registry.Relay) { recordSync(r, result, err, now) }
+	var connect *connectError
+	if errors.As(err, &connect) {
+		c.log.Printf("sync of %s could not connect, handing it back to the tester: %v", relay.URL, err)
+		// The tester's backoff decides when the relay is worth another try.
+		status := registry.NIP77Unreachable
+		if errors.Is(err, errForbiddenAddress) {
+			status = registry.NIP77Forbidden
+		}
+		update = func(r *registry.Relay) { recordTest(r, status, err.Error(), now) }
+	} else if err != nil {
+		c.log.Printf("sync of %s failed after %d new lists: %v", relay.URL, result.stored, err)
+	} else {
+		c.log.Printf("synced %s: %d new lists, %d windows", relay.URL, result.stored, len(result.boundaries)+1)
+	}
+	if err := c.registry.Update(relay.URL, update); err != nil {
+		c.log.Printf("failed to record the sync of %s: %v", relay.URL, err)
+	}
+}
+
 func recordTest(relay *registry.Relay, status registry.NIP77Status, detail string, now time.Time) {
 	relay.NIP77, relay.Detail, relay.TestedAt = status, detail, now
 	if status == registry.NIP77Unreachable {
@@ -121,6 +198,27 @@ func recordTest(relay *registry.Relay, status registry.NIP77Status, detail strin
 	default:
 		relay.NextTestAt = now.Add(retestInterval)
 	}
+}
+
+func recordSync(relay *registry.Relay, result syncResult, err error, now time.Time) {
+	relay.SyncedAt, relay.LastSyncNew, relay.SyncBoundaries = now, result.stored, result.boundaries
+	relay.SyncDetail = ""
+	if err != nil {
+		relay.SyncDetail = err.Error()
+	}
+	relay.SyncInterval = nextSyncInterval(relay.SyncInterval, result.stored)
+	relay.NextSyncAt = now.Add(relay.SyncInterval)
+}
+
+// nextSyncInterval halves the interval after a visit that brought new lists and doubles it otherwise.
+func nextSyncInterval(current time.Duration, stored int) time.Duration {
+	if current == 0 {
+		current = firstSyncInterval
+	}
+	if stored > 0 {
+		return max(minSyncInterval, current/2)
+	}
+	return min(maxSyncInterval, current*2)
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {

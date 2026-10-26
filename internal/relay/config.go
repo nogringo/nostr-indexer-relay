@@ -15,6 +15,8 @@ const (
 	defaultLMDBPath    = "./data/lmdb"
 	defaultStatePath   = "./data/state"
 	defaultMaxLimit    = 2000
+	// strfry's default: a session holds about 40 bytes per event in memory.
+	defaultNegentropyLimit = 1_000_000
 )
 
 type Config struct {
@@ -28,6 +30,8 @@ type Config struct {
 	LMDBPath    string
 	StatePath   string
 	MaxLimit    int
+	// Largest negentropy session served; 0 means defaultNegentropyLimit.
+	NegentropyLimit int
 }
 
 func LoadConfig() (Config, error) {

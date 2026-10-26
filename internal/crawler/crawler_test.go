@@ -38,3 +38,21 @@ func TestRecordTestSchedulesTheNextOne(t *testing.T) {
 		t.Fatalf("expected a forbidden relay to be retested in %s, got %s", deadRetestInterval, relay.NextTestAt.Sub(now))
 	}
 }
+
+func TestNextSyncInterval(t *testing.T) {
+	tests := []struct {
+		current time.Duration
+		stored  int
+		want    time.Duration
+	}{
+		{0, 3, 30 * time.Minute},
+		{0, 0, 2 * time.Hour},
+		{15 * time.Minute, 1, minSyncInterval},
+		{20 * time.Hour, 0, maxSyncInterval},
+	}
+	for _, test := range tests {
+		if got := nextSyncInterval(test.current, test.stored); got != test.want {
+			t.Errorf("nextSyncInterval(%s, %d) = %s, want %s", test.current, test.stored, got, test.want)
+		}
+	}
+}

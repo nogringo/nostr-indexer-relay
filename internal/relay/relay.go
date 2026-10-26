@@ -1,8 +1,10 @@
 package relay
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
+	"iter"
 	"net/http"
 	"slices"
 	"strings"
@@ -11,17 +13,20 @@ import (
 	"fiatjaf.com/nostr/eventstore"
 	"fiatjaf.com/nostr/khatru"
 	"fiatjaf.com/nostr/nip11"
+
+	"nostr-indexer-relay/internal/scan"
 )
 
 // About 1950 authors at 67 bytes each, within defaultMaxLimit: a REQ that fits is never truncated.
-const maxMessageSize = 128 << 10
+// It is also the size limit of every stored event, whatever its path.
+const MaxMessageSize = 128 << 10
 
 func New(cfg Config, store eventstore.Store) *khatru.Relay {
 	relay := khatru.NewRelay()
 	relay.Addr = cfg.Addr
 	relay.ServiceURL = cfg.RelayURL
 	relay.Negentropy = true
-	relay.MaxMessageSize = maxMessageSize
+	relay.MaxMessageSize = MaxMessageSize
 
 	relay.Info.Name = cfg.Name
 	relay.Info.Description = cfg.Description
@@ -46,8 +51,35 @@ func New(cfg Config, store eventstore.Store) *khatru.Relay {
 
 	relay.OnEvent = acceptOnlyRelayLists
 	relay.UseEventstore(store, cfg.MaxLimit)
+	serveFullNegentropySessions(relay, store, cmp.Or(cfg.NegentropyLimit, defaultNegentropyLimit))
 
 	return relay
+}
+
+// khatru caps a negentropy session at 20 times the max limit and truncates the rest silently,
+// so a peer would never learn about older lists. Sessions are served in full instead, and
+// refused beyond limit with strfry's reason, which tells the peer to split its sync.
+func serveFullNegentropySessions(relay *khatru.Relay, store eventstore.Store, limit int) {
+	queryStored := relay.QueryStored
+	relay.QueryStored = func(ctx context.Context, filter nostr.Filter) iter.Seq[nostr.Event] {
+		if khatru.IsNegentropySession(ctx) {
+			return scan.Events(store, filter, scan.PageSize)
+		}
+		return queryStored(ctx, filter)
+	}
+	relay.OnRequest = func(ctx context.Context, filter nostr.Filter) (bool, string) {
+		if !khatru.IsNegentropySession(ctx) {
+			return false, ""
+		}
+		count, err := store.CountEvents(filter)
+		if err != nil {
+			return true, "error: " + err.Error()
+		}
+		if int(count) > limit {
+			return true, "blocked: too many query results"
+		}
+		return false, ""
+	}
 }
 
 func acceptOnlyRelayLists(_ context.Context, event nostr.Event) (bool, string) {

@@ -5,11 +5,17 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore/lmdb"
 	"fiatjaf.com/nostr/nip11"
+	"fiatjaf.com/nostr/nip77"
+	"fiatjaf.com/nostr/nip77/negentropy"
+	"fiatjaf.com/nostr/nip77/negentropy/storage/vector"
+	"github.com/coder/websocket"
 )
 
 var skA = nostr.MustSecretKeyFromHex("0000000000000000000000000000000000000000000000000000000000000001")
@@ -95,6 +101,73 @@ func TestRelayInformationListsOnlySupportedNIPs(t *testing.T) {
 		t.Fatalf("expected supported NIPs %v, got %v", want, nips)
 	}
 }
+
+func TestRelayServesNegentropySessionsBeyondKhatruCap(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxLimit = 2
+	url := serveRelayWithLists(t, cfg, 50)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ids := 0
+	err := nip77.NegentropySync(ctx, url, nostr.Filter{Kinds: []nostr.Kind{nostr.KindRelayListMetadata}}, nil, discard{}, func(_ context.Context, dir nip77.Direction) {
+		for range dir.Items {
+			ids++
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids != 50 {
+		t.Fatalf("expected all 50 lists in the session, khatru alone stops at %d; got %d", 20*cfg.MaxLimit, ids)
+	}
+}
+
+func TestRelayRefusesNegentropySessionsBeyondLimit(t *testing.T) {
+	cfg := testConfig()
+	cfg.NegentropyLimit = 10
+	url := serveRelayWithLists(t, cfg, 11)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+
+	empty := vector.New()
+	empty.Seal()
+	open, _ := nip77.OpenEnvelope{SubscriptionID: "s", Filter: nostr.Filter{Kinds: []nostr.Kind{nostr.KindRelayListMetadata}}, Message: negentropy.New(empty, 60_000, false, true).Start()}.MarshalJSON()
+	if err := conn.Write(ctx, websocket.MessageText, open); err != nil {
+		t.Fatal(err)
+	}
+	_, reply, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// khatru labels it NEG-ERROR instead of NEG-ERR.
+	if want := `["NEG-ERROR","s","blocked: too many query results"]`; strings.TrimSpace(string(reply)) != want {
+		t.Fatalf("got %s, want %s", reply, want)
+	}
+}
+
+func serveRelayWithLists(t *testing.T, cfg Config, lists int) string {
+	t.Helper()
+	relay := New(cfg, newTestStore(t))
+	for range lists {
+		if _, err := relay.AddEvent(context.Background(), relayList(t, nostr.Generate(), nostr.Now(), "wss://relay.example.com")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := httptest.NewServer(relay)
+	t.Cleanup(server.Close)
+	return "ws" + strings.TrimPrefix(server.URL, "http")
+}
+
+type discard struct{}
+
+func (discard) Publish(context.Context, nostr.Event) error { return nil }
 
 func testConfig() Config {
 	return Config{

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"fiatjaf.com/nostr"
 	"github.com/PowerDNS/lmdb-go/lmdb"
 )
 
@@ -33,6 +34,14 @@ type Relay struct {
 	TestedAt   time.Time   `json:"tested_at,omitzero"`
 	NextTestAt time.Time   `json:"next_test_at,omitzero"`
 	Failures   int         `json:"failures,omitempty"`
+
+	SyncedAt     time.Time     `json:"synced_at,omitzero"`
+	NextSyncAt   time.Time     `json:"next_sync_at,omitzero"`
+	SyncInterval time.Duration `json:"sync_interval,omitempty"`
+	LastSyncNew  int           `json:"last_sync_new,omitempty"`
+	SyncDetail   string        `json:"sync_detail,omitempty"`
+	// Boundaries between the since/until windows the relay accepts one negentropy session for.
+	SyncBoundaries []nostr.Timestamp `json:"sync_boundaries,omitempty"`
 }
 
 // Registry keeps every relay in memory and writes each change through to LMDB.
@@ -154,12 +163,23 @@ func (r *Registry) SetPopularity(counts map[string]int, seeds []string) error {
 // Due returns up to n relays whose next test is due, seeds first, then the most popular.
 // Relays that no list mentions any more are left alone.
 func (r *Registry) Due(now time.Time, n int) []Relay {
+	return r.due(n, func(relay *Relay) bool { return !relay.NextTestAt.After(now) })
+}
+
+// DueForSync is like Due, for the relays that support NIP-77 and whose next sync is due.
+func (r *Registry) DueForSync(now time.Time, n int) []Relay {
+	return r.due(n, func(relay *Relay) bool {
+		return relay.NIP77 == NIP77Supported && !relay.NextSyncAt.After(now)
+	})
+}
+
+func (r *Registry) due(n int, isDue func(*Relay) bool) []Relay {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	var due []Relay
 	for _, relay := range r.relays {
-		if (relay.Seed || relay.Popularity > 0) && !relay.NextTestAt.After(now) {
+		if (relay.Seed || relay.Popularity > 0) && isDue(relay) {
 			due = append(due, *relay)
 		}
 	}

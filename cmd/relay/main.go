@@ -44,7 +44,8 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	server := &http.Server{Addr: cfg.Addr, Handler: indexer.New(cfg, store)}
+	relay := indexer.New(cfg, store)
+	server := &http.Server{Addr: cfg.Addr, Handler: relay}
 	go func() {
 		<-ctx.Done()
 		server.Shutdown(context.Background())
@@ -53,7 +54,7 @@ func run() error {
 	crawlerDone := make(chan struct{})
 	go func() {
 		defer close(crawlerDone)
-		crawler.New(store, relays, log.New(os.Stderr, "[crawler] ", log.LstdFlags)).Run(ctx)
+		crawler.New(store, relay, relays, log.New(os.Stderr, "[crawler] ", log.LstdFlags)).Run(ctx)
 	}()
 
 	log.Printf("nostr indexer relay listening on %s", cfg.Addr)

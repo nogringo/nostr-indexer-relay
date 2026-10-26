@@ -94,11 +94,14 @@ For each relay the registry keeps:
 
 ### Sync and revisit
 
-- Each visit is a negentropy sync on `{"kinds":[10002]}` that downloads what we lack.
-- strfry refuses negentropy sessions over 1,000,000 events (`blocked: too many query results`), and the largest indexers hold more 10002 than that. The sync is then split into `since`/`until` windows, halved until each one is accepted. The windows are remembered per relay for the next visits.
-- The revisit interval follows activity: shorter when a visit brought new lists, longer when it brought nothing, always between a minimum and a maximum.
-- An unreachable relay goes into exponential backoff, from 1 hour doubling at each failure. After 8 consecutive failures, about 5 days, it is marked dead and retested every 30 days.
-- Every fetched event has its id and signature verified. Events over 128 KB are skipped, as for direct publications, and so are events tagged `-` (NIP-70: only their author may publish them). The rest goes through the same replace path as direct publications.
+- Each visit is a download-only negentropy sync on `{"kinds":[10002]}`. Only relays whose last test passed are visited, 4 at a time.
+- strfry refuses negentropy sessions over 1,000,000 events (`blocked: too many query results`), and the largest indexers hold more 10002 than that. The sync is then split into `since`/`until` windows: a refused window is cut halfway between its bounds (2020-01-01 for the first window, now for the last one) until each one is accepted. The windows are remembered per relay for the next visits, even when a sync is interrupted by a shutdown.
+- A negentropy round may take up to 2 minutes: directory.yabu.me took 35 s to open a window of about a million lists.
+- Missing lists are fetched by id, 500 per REQ. A relay may return fewer than asked for (its `max_limit`), so missing ids are asked again until a pass brings none.
+- The revisit interval follows activity: it starts at 1 hour, is halved after a visit that brought new lists and doubled otherwise, between 10 minutes and 24 hours.
+- An unreachable relay goes into exponential backoff, from 1 hour doubling at each failure. After 8 consecutive failures, about 5 days, it is marked dead and retested every 30 days. A sync that cannot connect hands the relay back to this backoff.
+- Every fetched event has its id and its signature verified; the signature check alone trusts the announced id. Events over 128 KB are skipped, as for direct publications, and so are events tagged `-` (NIP-70: only their author may publish them). A list is stored only when it is newer than ours, through the same path as direct publications, and pushed to our live subscribers.
+- Measured on 2026-10-26 from an empty index: about 1,500 lists per second, 615,000 lists after 7 minutes.
 
 ### Indexer detection
 
@@ -153,7 +156,13 @@ When the admin turns the visitor interface off, the relay, NIP-11 and the admin 
 - Events: LMDB, through `fiatjaf.com/nostr/eventstore/lmdb`.
 - Crawler state and settings: LMDB too, in a separate environment (`RELAY_STATE_PATH`, `./data/state` by default). The registry is held in memory and every change is written through.
 
-Known constraint: khatru caps a negentropy session at 20 times the max limit (40,000 events with the defaults), and the LMDB backend decodes every matching event to build it. Serving a negentropy sync of the whole index to other instances needs a dedicated scan that reads only `(created_at, id)` pairs. Beyond its own limit, the relay must answer `NEG-ERR` with `blocked: too many query results`, like strfry, instead of truncating silently, so that peers know to split their sync. Note that khatru labels its errors `NEG-ERROR` instead of NIP-77's `NEG-ERR`; our NIP-77 test accepts both.
+The LMDB backend allocates for the whole limit of a query up front, so every full read of the index (discovery, negentropy vectors, negentropy sessions served to peers) goes through a paged scan, 5000 events at a time. When more than 5000 lists share one `created_at`, the rest of that second is skipped.
+
+Negentropy sessions served to peers:
+
+- khatru alone caps a session at 20 times the max limit (40,000 events with the defaults) and truncates the rest silently. The relay serves sessions in full instead.
+- Beyond 1,000,000 events, like strfry, a session is refused with `blocked: too many query results`, so that peers know to split their sync. The size is checked on the LMDB index before the session is built.
+- khatru labels this refusal `NEG-ERROR` instead of NIP-77's `NEG-ERR`. Our own crawler accepts both, but a strict NIP-77 client will not recognize it. This needs a fix in khatru.
 
 ## Stack
 
@@ -164,7 +173,7 @@ Known constraint: khatru caps a negentropy session at 20 times the max limit (40
 
 1. Relay base: kind 10002 only, NIP-11, NIP-45, NIP-77, high limits, Docker image. Done.
 2. Relay registry, SSRF-safe dialer, NIP-77 test. Done.
-3. Negentropy crawler: discovery, adaptive revisit, health, full-index negentropy serving.
+3. Negentropy crawler: discovery, adaptive revisit, health, full-index negentropy serving. Done.
 4. Indexer detection and live subscriptions.
 5. Admin interface and authentication.
 6. Visitor interface.

@@ -3,6 +3,8 @@ package registry
 import (
 	"testing"
 	"time"
+
+	"fiatjaf.com/nostr"
 )
 
 func TestSetPopularityAddsAndResetsRelays(t *testing.T) {
@@ -47,20 +49,45 @@ func TestDueOrdersSeedsThenPopularityAndSkipsForgottenRelays(t *testing.T) {
 	}
 }
 
+func TestDueForSyncOnlyReturnsSupportedRelays(t *testing.T) {
+	r := openTestRegistry(t, t.TempDir())
+	counts := map[string]int{"wss://supported.example.com": 1, "wss://unsupported.example.com": 5, "wss://later.example.com": 9}
+	if err := r.SetPopularity(counts, nil); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for url, update := range map[string]func(*Relay){
+		"wss://supported.example.com":   func(relay *Relay) { relay.NIP77 = NIP77Supported },
+		"wss://unsupported.example.com": func(relay *Relay) { relay.NIP77 = NIP77Unsupported },
+		"wss://later.example.com":       func(relay *Relay) { relay.NIP77, relay.NextSyncAt = NIP77Supported, now.Add(time.Hour) },
+	} {
+		if err := r.Update(url, update); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	due := r.DueForSync(now, 10)
+	if len(due) != 1 || due[0].URL != "wss://supported.example.com" {
+		t.Fatalf("expected only the supported relay due now, got %+v", due)
+	}
+}
+
 func TestRegistrySurvivesReopening(t *testing.T) {
 	path := t.TempDir()
 	r := openTestRegistry(t, path)
 	if err := r.SetPopularity(map[string]int{"wss://a.example.com": 2}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Update("wss://a.example.com", func(relay *Relay) { relay.NIP77 = NIP77Supported }); err != nil {
+	if err := r.Update("wss://a.example.com", func(relay *Relay) {
+		relay.NIP77, relay.SyncInterval, relay.SyncBoundaries = NIP77Supported, time.Hour, []nostr.Timestamp{1700000000}
+	}); err != nil {
 		t.Fatal(err)
 	}
 	r.Close()
 
 	reopened := openTestRegistry(t, path)
 	relay, ok := reopened.Get("wss://a.example.com")
-	if !ok || relay.NIP77 != NIP77Supported || relay.Popularity != 2 {
+	if !ok || relay.NIP77 != NIP77Supported || relay.Popularity != 2 || relay.SyncInterval != time.Hour || len(relay.SyncBoundaries) != 1 {
 		t.Fatalf("expected the relay to survive reopening, got %+v", relay)
 	}
 }

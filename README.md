@@ -2,7 +2,7 @@
 
 Turnkey Nostr indexer relay. It stores NIP-65 relay lists (kind 10002) only, and fills itself by crawling the network over NIP-77.
 
-Status: early. The relay accepts and serves kind 10002. The crawler discovers relays from the stored lists and tests their NIP-77 support, but does not sync from them yet. There is no web interface yet. See [SPEC.md](SPEC.md) for the full design.
+Status: early. The relay accepts and serves kind 10002. The crawler discovers relays from the stored lists, tests their NIP-77 support and syncs from the ones that pass. Live subscriptions, indexer detection and the web interface are not written yet. See [SPEC.md](SPEC.md) for the full design.
 
 Supported NIPs: 1, 11, 40, 42, 45, 65, 70, 77.
 
@@ -17,6 +17,14 @@ or, from source:
 ```sh
 go run ./cmd/relay
 ```
+
+## Tests
+
+```sh
+go test -race -gcflags=all=-d=checkptr=0 ./...
+```
+
+`checkptr` is turned off because `fiatjaf.com/nostr` serializes events with pointer arithmetic that it rejects, which crashes the tests under `-race`.
 
 ## Configuration
 
