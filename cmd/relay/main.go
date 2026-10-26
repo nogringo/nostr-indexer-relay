@@ -1,26 +1,67 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
+	"fiatjaf.com/nostr/eventstore/lmdb"
+
+	"nostr-indexer-relay/internal/crawler"
+	"nostr-indexer-relay/internal/registry"
 	indexer "nostr-indexer-relay/internal/relay"
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	cfg, err := indexer.LoadConfig()
 	if err != nil {
-		log.Fatalf("configuration error: %v", err)
+		return fmt.Errorf("configuration error: %w", err)
 	}
 
-	relay, closeStore, err := indexer.New(cfg)
-	if err != nil {
-		log.Fatalf("relay setup error: %v", err)
+	store := &lmdb.LMDBBackend{Path: cfg.LMDBPath}
+	if err := store.Init(); err != nil {
+		return fmt.Errorf("event store error: %w", err)
 	}
-	defer closeStore()
+	defer store.Close()
+
+	relays, err := registry.Open(cfg.StatePath)
+	if err != nil {
+		return fmt.Errorf("relay registry error: %w", err)
+	}
+	defer relays.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	server := &http.Server{Addr: cfg.Addr, Handler: indexer.New(cfg, store)}
+	go func() {
+		<-ctx.Done()
+		server.Shutdown(context.Background())
+	}()
+
+	crawlerDone := make(chan struct{})
+	go func() {
+		defer close(crawlerDone)
+		crawler.New(store, relays, log.New(os.Stderr, "[crawler] ", log.LstdFlags)).Run(ctx)
+	}()
 
 	log.Printf("nostr indexer relay listening on %s", cfg.Addr)
-	if err := http.ListenAndServe(cfg.Addr, relay); err != nil {
-		log.Fatalf("relay stopped: %v", err)
+	serveErr := server.ListenAndServe()
+	stop()
+	<-crawlerDone
+	if !errors.Is(serveErr, http.ErrServerClosed) {
+		return fmt.Errorf("relay stopped: %w", serveErr)
 	}
+	return nil
 }

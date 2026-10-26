@@ -15,7 +15,7 @@ import (
 var skA = nostr.MustSecretKeyFromHex("0000000000000000000000000000000000000000000000000000000000000001")
 
 func TestRelayAcceptsOnlyRelayLists(t *testing.T) {
-	relay := NewWithStore(testConfig(), newTestStore(t))
+	relay := New(testConfig(), newTestStore(t))
 	ctx := context.Background()
 
 	if _, err := relay.AddEvent(ctx, relayList(t, skA, nostr.Now(), "wss://relay.example.com")); err != nil {
@@ -31,7 +31,7 @@ func TestRelayAcceptsOnlyRelayLists(t *testing.T) {
 
 func TestRelayKeepsNewestListWhateverTheArrivalOrder(t *testing.T) {
 	store := newTestStore(t)
-	relay := NewWithStore(testConfig(), store)
+	relay := New(testConfig(), store)
 	ctx := context.Background()
 
 	newer := relayList(t, skA, 2000, "wss://new.example.com")
@@ -52,7 +52,7 @@ func TestRelayKeepsNewestListWhateverTheArrivalOrder(t *testing.T) {
 }
 
 func TestRelayServesLargeAuthorsFilter(t *testing.T) {
-	relay := NewWithStore(testConfig(), newTestStore(t))
+	relay := New(testConfig(), newTestStore(t))
 	ctx := context.Background()
 
 	const authors = 2000
@@ -75,7 +75,7 @@ func TestRelayServesLargeAuthorsFilter(t *testing.T) {
 }
 
 func TestRelayInformationListsOnlySupportedNIPs(t *testing.T) {
-	relay := NewWithStore(testConfig(), newTestStore(t))
+	relay := New(testConfig(), newTestStore(t))
 
 	request := httptest.NewRequest("GET", "/", nil)
 	request.Header.Set("Accept", "application/nostr+json")

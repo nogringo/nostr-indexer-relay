@@ -50,8 +50,9 @@ Federation needs nothing specific: another instance is one more NIP-77 relay for
 
 - The crawler starts from a built-in list of seed relays (see Default seeds).
 - Every `wss://` URL in the `r` tags of stored 10002 is a candidate relay. Other schemes are ignored.
-- Candidate URLs are normalized before entering the registry, so that `wss://x.com` and `wss://x.com/` collapse into one entry. Events themselves are stored as received.
-- Candidates are tested in order of popularity: the number of pubkeys whose 10002 lists them.
+- Candidate URLs are normalized before entering the registry, so that `wss://x.com` and `wss://x.com/` collapse into one entry. URLs over 255 bytes are ignored. Events themselves are stored as received.
+- Candidates are tested in order of popularity: the number of pubkeys whose 10002 lists them, seeds first.
+- Popularity is recounted by a full scan of the stored lists at startup and every 15 minutes. A relay that no list mentions any more is no longer tested, unless it is a seed.
 
 ### Default seeds
 
@@ -77,7 +78,7 @@ The test sends a `NEG-OPEN` on `{"kinds":[10002]}`:
 - `NEG-ERR`: supported, but this query was refused. When the reason is the size of the set, the sync is split into windows (see Sync and revisit).
 - `NOTICE`, `CLOSED`, or nothing before a timeout: not supported.
 
-Tests are repeated periodically, since relays get upgraded. Only relays that passed the test are ever queried.
+Tests run 16 at a time, with a 10 second timeout each. A relay that answered is retested every 7 days, since relays get upgraded. Only relays that passed the test are ever queried.
 
 NIP-11 is wrong in both directions: on 2026-10-26, indexer.coracle.social and relay.nos.social did not list 77 but support it.
 
@@ -96,7 +97,7 @@ For each relay the registry keeps:
 - Each visit is a negentropy sync on `{"kinds":[10002]}` that downloads what we lack.
 - strfry refuses negentropy sessions over 1,000,000 events (`blocked: too many query results`), and the largest indexers hold more 10002 than that. The sync is then split into `since`/`until` windows, halved until each one is accepted. The windows are remembered per relay for the next visits.
 - The revisit interval follows activity: shorter when a visit brought new lists, longer when it brought nothing, always between a minimum and a maximum.
-- An unreachable relay goes into exponential backoff. If it stays unreachable, it is marked dead and retested rarely.
+- An unreachable relay goes into exponential backoff, from 1 hour doubling at each failure. After 8 consecutive failures, about 5 days, it is marked dead and retested every 30 days.
 - Every fetched event has its id and signature verified. Events over 128 KB are skipped, as for direct publications, and so are events tagged `-` (NIP-70: only their author may publish them). The rest goes through the same replace path as direct publications.
 
 ### Indexer detection
@@ -119,7 +120,8 @@ The crawler connects to URLs taken from untrusted events.
 
 - Only `wss://` URLs are dialed, on port 443 by default; other ports can be allowed in the settings.
 - `localhost`, `.onion` and any host that resolves to a loopback, private, link-local, CGNAT, multicast or unspecified address are rejected.
-- The resolved IP is checked at dial time, not only the hostname, to defeat DNS rebinding.
+- The resolved IP is checked at dial time, not only the hostname, to defeat DNS rebinding. A relay that fails this check is marked forbidden and rechecked every 30 days, since DNS can change.
+- HTTP redirects are not followed.
 
 ## Web interface
 
@@ -149,9 +151,9 @@ When the admin turns the visitor interface off, the relay, NIP-11 and the admin 
 ## Storage
 
 - Events: LMDB, through `fiatjaf.com/nostr/eventstore/lmdb`.
-- Crawler state and settings: LMDB too, in a separate environment under the data directory.
+- Crawler state and settings: LMDB too, in a separate environment (`RELAY_STATE_PATH`, `./data/state` by default). The registry is held in memory and every change is written through.
 
-Known constraint: khatru caps a negentropy session at 20 times the max limit (40,000 events with the defaults), and the LMDB backend decodes every matching event to build it. Serving a negentropy sync of the whole index to other instances needs a dedicated scan that reads only `(created_at, id)` pairs. Beyond its own limit, the relay must answer `NEG-ERR` with `blocked: too many query results`, like strfry, instead of truncating silently, so that peers know to split their sync.
+Known constraint: khatru caps a negentropy session at 20 times the max limit (40,000 events with the defaults), and the LMDB backend decodes every matching event to build it. Serving a negentropy sync of the whole index to other instances needs a dedicated scan that reads only `(created_at, id)` pairs. Beyond its own limit, the relay must answer `NEG-ERR` with `blocked: too many query results`, like strfry, instead of truncating silently, so that peers know to split their sync. Note that khatru labels its errors `NEG-ERROR` instead of NIP-77's `NEG-ERR`; our NIP-77 test accepts both.
 
 ## Stack
 
@@ -160,8 +162,8 @@ Known constraint: khatru caps a negentropy session at 20 times the max limit (40
 
 ## Milestones
 
-1. Relay base: kind 10002 only, NIP-11, NIP-45, NIP-77, high limits, Docker image.
-2. Relay registry, SSRF-safe dialer, NIP-77 test.
+1. Relay base: kind 10002 only, NIP-11, NIP-45, NIP-77, high limits, Docker image. Done.
+2. Relay registry, SSRF-safe dialer, NIP-77 test. Done.
 3. Negentropy crawler: discovery, adaptive revisit, health, full-index negentropy serving.
 4. Indexer detection and live subscriptions.
 5. Admin interface and authentication.
@@ -169,4 +171,4 @@ Known constraint: khatru caps a negentropy session at 20 times the max limit (40
 
 ## Open questions
 
-- Starting values (revisit minimum and maximum, 7 days, cap of 50, 50 % threshold) are to be tuned on real data.
+- Starting values (revisit minimum and maximum, 7 days, cap of 50, 50 % threshold, 16 parallel tests, 10 second timeout, 15 minute discovery, backoff and dead thresholds) are to be tuned on real data.

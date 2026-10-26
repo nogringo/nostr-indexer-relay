@@ -2,17 +2,19 @@ module nostr-indexer-relay
 
 go 1.26.2
 
-require fiatjaf.com/nostr v0.0.0-20260701134336-94cc8043858a
+require (
+	fiatjaf.com/nostr v0.0.0-20260701134336-94cc8043858a
+	github.com/PowerDNS/lmdb-go v1.9.3
+	github.com/coder/websocket v1.8.13
+)
 
 require (
 	fiatjaf.com/lib v0.3.7 // indirect
 	github.com/ImVexed/fasturl v0.0.0-20230304231329-4e41488060f3 // indirect
-	github.com/PowerDNS/lmdb-go v1.9.3 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
-	github.com/coder/websocket v1.8.13 // indirect
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/fasthttp/websocket v1.5.12 // indirect

@@ -9,7 +9,6 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore"
-	"fiatjaf.com/nostr/eventstore/lmdb"
 	"fiatjaf.com/nostr/khatru"
 	"fiatjaf.com/nostr/nip11"
 )
@@ -17,16 +16,7 @@ import (
 // About 1950 authors at 67 bytes each, within defaultMaxLimit: a REQ that fits is never truncated.
 const maxMessageSize = 128 << 10
 
-func New(cfg Config) (*khatru.Relay, func(), error) {
-	store := &lmdb.LMDBBackend{Path: cfg.LMDBPath}
-	if err := store.Init(); err != nil {
-		return nil, nil, err
-	}
-
-	return NewWithStore(cfg, store), store.Close, nil
-}
-
-func NewWithStore(cfg Config, store eventstore.Store) *khatru.Relay {
+func New(cfg Config, store eventstore.Store) *khatru.Relay {
 	relay := khatru.NewRelay()
 	relay.Addr = cfg.Addr
 	relay.ServiceURL = cfg.RelayURL

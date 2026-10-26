@@ -13,6 +13,7 @@ const (
 	defaultName        = "Indexer relay"
 	defaultDescription = "An indexer relay that stores NIP-65 relay lists (kind 10002) only."
 	defaultLMDBPath    = "./data/lmdb"
+	defaultStatePath   = "./data/state"
 	defaultMaxLimit    = 2000
 )
 
@@ -25,6 +26,7 @@ type Config struct {
 	Contact     string
 	PubKey      *nostr.PubKey
 	LMDBPath    string
+	StatePath   string
 	MaxLimit    int
 }
 
@@ -37,6 +39,7 @@ func LoadConfig() (Config, error) {
 		Icon:        os.Getenv("RELAY_ICON"),
 		Contact:     os.Getenv("RELAY_CONTACT"),
 		LMDBPath:    envOrDefault("RELAY_LMDB_PATH", defaultLMDBPath),
+		StatePath:   envOrDefault("RELAY_STATE_PATH", defaultStatePath),
 		MaxLimit:    defaultMaxLimit,
 	}
 
