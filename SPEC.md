@@ -100,7 +100,8 @@ For each relay the registry keeps:
 - Missing lists are fetched by id, 500 per REQ. A relay may return fewer than asked for (its `max_limit`), so missing ids are asked again until a pass brings none.
 - The revisit interval follows activity: it starts at 1 hour, is halved after a visit that brought new lists and doubled otherwise, between 10 minutes and 24 hours.
 - An unreachable relay goes into exponential backoff, from 1 hour doubling at each failure. After 8 consecutive failures, about 5 days, it is marked dead and retested every 30 days. A sync that cannot connect hands the relay back to this backoff.
-- Every fetched event has its id and its signature verified; the signature check alone trusts the announced id. Events over 128 KB are skipped, as for direct publications, and so are events tagged `-` (NIP-70: only their author may publish them). A list is stored only when it is newer than ours, through the same path as direct publications, and pushed to our live subscribers.
+- Every fetched event has its id and its signature verified; the signature check alone trusts the announced id. Events over 128 KB are skipped, as for direct publications, and so are events tagged `-` (NIP-70: only their author may publish them). A list is stored only when it is newer than ours, through the same path as direct publications, and pushed to our live subscribers. A list that is not newer than ours is dropped before its signature is checked: a relay may hold many lists older than ours, and negentropy reports them again at every visit.
+- The sync log gives the lists stored and the lists fetched, so that such downloads show up.
 - Measured on 2026-10-26 from an empty index: about 1,500 lists per second, 615,000 lists after 7 minutes.
 
 ### Indexer detection
@@ -168,17 +169,19 @@ When the admin turns the visitor interface off, the relay, NIP-11 and the admin 
 - Events: LMDB, through `fiatjaf.com/nostr/eventstore/lmdb`.
 - Crawler state and settings: LMDB too, in a separate environment (`RELAY_STATE_PATH`, `./data/state` by default). The registry is held in memory and every change is written through. The same environment keeps the settings, the admin pubkey, the session key and the lists stored per day, the last written at most once a minute.
 
-The LMDB backend allocates for the whole limit of a query up front, so every full read of the index (discovery, negentropy vectors, negentropy sessions served to peers) goes through a paged scan, 5000 events at a time. When more than 5000 lists share one `created_at`, the rest of that second is skipped.
+The `created_at` and id of every stored list are also kept in memory, ordered as negentropy wants them: about 40 bytes per list, 100 MB for 2.5 million lists. One read of the whole index builds them at startup, and every write, replacement and expiration updates them. Negentropy sessions, ours and those served to peers, and counts by date are answered from memory. Reading the lists from LMDB for each session decoded every one of them: on 2.5 million lists, about 3 GB allocated at each visit of each relay, which kept both cores of a small VPS busy.
+
+The LMDB backend allocates for the whole limit of a query up front, so every full read of the stored lists (the startup index, discovery, peer sessions on other filters) goes through a paged scan, 5000 events at a time. When more than 5000 lists share one `created_at`, the rest of that second is skipped. Discovery parses each distinct relay URL once per scan.
 
 Negentropy sessions served to peers:
 
 - khatru alone caps a session at 20 times the max limit (40,000 events with the defaults) and truncates the rest silently. The relay serves sessions in full instead.
-- Beyond 1,000,000 events, like strfry, a session is refused with `blocked: too many query results`, so that peers know to split their sync. The size is checked on the LMDB index before the session is built.
+- Beyond 1,000,000 events, like strfry, a session is refused with `blocked: too many query results`, so that peers know to split their sync. The size is checked on the in-memory index before the session is built.
 - khatru labels this refusal `NEG-ERROR` instead of NIP-77's `NEG-ERR`. Our own crawler accepts both, but a strict NIP-77 client will not recognize it. This needs a fix in khatru.
 
 ## Stack
 
-- Go, with `fiatjaf.com/nostr` (khatru, negentropy, NIP-45) and LMDB, like nostr-private-relay.
+- Go, with `fiatjaf.com/nostr` (khatru, negentropy, NIP-45) and LMDB, like nostr-private-relay. `github.com/google/btree` holds the in-memory index.
 - Docker image on GHCR for linux/amd64 and linux/arm64, built by GitHub Actions.
 
 ## Milestones

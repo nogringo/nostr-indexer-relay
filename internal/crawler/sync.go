@@ -11,9 +11,6 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip77"
 	"fiatjaf.com/nostr/nip77/negentropy"
-	"fiatjaf.com/nostr/nip77/negentropy/storage/vector"
-
-	"nostr-indexer-relay/internal/scan"
 )
 
 const (
@@ -43,7 +40,9 @@ type reconciliation struct {
 }
 
 type syncResult struct {
-	stored     int
+	stored int
+	// Lists downloaded, stored or not: a relay may hold lists older than ours.
+	fetched    int
 	boundaries []nostr.Timestamp
 	// Number of lists the relay holds, summed over the windows synced so far.
 	lists int
@@ -93,8 +92,9 @@ func (c *Crawler) syncRelay(ctx context.Context, url string, boundaries []nostr.
 		}
 
 		result.lists += lists
-		stored, err := c.fetch(ctx, conn, url, ids)
+		stored, fetched, err := c.fetch(ctx, conn, url, ids)
 		result.stored += stored
+		result.fetched += fetched
 		if err != nil {
 			return result, err
 		}
@@ -131,11 +131,7 @@ func split(since, until, now nostr.Timestamp) (nostr.Timestamp, bool) {
 // lack, and the number of lists the relay holds in it.
 func (c *Crawler) reconcile(ctx context.Context, conn *nostr.Relay, incoming <-chan relayMessage, since, until nostr.Timestamp) ([]nostr.ID, int, error) {
 	filter := nostr.Filter{Kinds: relayListsFilter.Kinds, Since: since, Until: until}
-	local := vector.New()
-	for event := range scan.Events(c.store, filter, scan.PageSize) {
-		local.Insert(event.CreatedAt, event.ID)
-	}
-	local.Seal()
+	local := c.store.Vector(since, until)
 
 	// Haves only reports the ids we have and they lack: nothing is uploaded.
 	neg := negentropy.New(local, negentropyFrameSize, true, true)
@@ -224,22 +220,23 @@ func (c *Crawler) reconcile(ctx context.Context, conn *nostr.Relay, incoming <-c
 	}
 }
 
-// fetch downloads the events by id and returns how many were stored. A relay may return fewer
-// events than asked for (its max_limit), so missing ids are asked again until a pass brings none.
-func (c *Crawler) fetch(ctx context.Context, conn *nostr.Relay, url string, ids []nostr.ID) (int, error) {
-	stored := 0
+// fetch downloads the events by id and returns how many were stored and received. A relay may
+// return fewer events than asked for (its max_limit), so missing ids are asked again until a pass
+// brings none.
+func (c *Crawler) fetch(ctx context.Context, conn *nostr.Relay, url string, ids []nostr.ID) (stored, fetched int, err error) {
 	for len(ids) > 0 {
 		received := make(map[nostr.ID]bool)
 		for batch := range slices.Chunk(ids, fetchBatchSize) {
 			sub, err := conn.Subscribe(ctx, nostr.Filter{IDs: batch}, nostr.SubscriptionOptions{Label: "fetch", MaxWaitForEOSE: fetchTimeout})
 			if err != nil {
-				return stored, err
+				return stored, fetched, err
 			}
 		events:
 			for {
 				select {
 				case event := <-sub.Events:
 					received[event.ID] = true
+					fetched++
 					if c.receive(ctx, url, event) {
 						stored++
 					}
@@ -249,7 +246,7 @@ func (c *Crawler) fetch(ctx context.Context, conn *nostr.Relay, url string, ids 
 					break events
 				case <-ctx.Done():
 					sub.Unsub()
-					return stored, ctx.Err()
+					return stored, fetched, ctx.Err()
 				}
 			}
 			sub.Unsub()
@@ -259,5 +256,5 @@ func (c *Crawler) fetch(ctx context.Context, conn *nostr.Relay, url string, ids 
 		}
 		ids = slices.DeleteFunc(ids, func(id nostr.ID) bool { return received[id] })
 	}
-	return stored, nil
+	return stored, fetched, nil
 }

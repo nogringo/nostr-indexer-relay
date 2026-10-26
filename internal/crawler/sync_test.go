@@ -13,6 +13,7 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore/lmdb"
 
+	"nostr-indexer-relay/internal/index"
 	"nostr-indexer-relay/internal/registry"
 	indexer "nostr-indexer-relay/internal/relay"
 )
@@ -123,11 +124,12 @@ func TestSyncRelayFailures(t *testing.T) {
 
 func newTestCrawler(t *testing.T) *Crawler {
 	t.Helper()
-	store := &lmdb.LMDBBackend{Path: t.TempDir()}
-	if err := store.Init(); err != nil {
+	backend := &lmdb.LMDBBackend{Path: t.TempDir()}
+	if err := backend.Init(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(store.Close)
+	t.Cleanup(backend.Close)
+	store := index.New(backend)
 	relays, err := registry.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

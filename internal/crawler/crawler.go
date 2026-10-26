@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"fiatjaf.com/nostr/eventstore"
 	"fiatjaf.com/nostr/khatru"
 
+	"nostr-indexer-relay/internal/index"
 	"nostr-indexer-relay/internal/registry"
 )
 
@@ -32,7 +32,7 @@ const (
 )
 
 type Crawler struct {
-	store      eventstore.Store
+	store      *index.Store
 	relay      *khatru.Relay
 	registry   *registry.Registry
 	client     *http.Client
@@ -46,7 +46,7 @@ type Crawler struct {
 
 // New returns a crawler that stores what it fetches through relay, so that fetched lists
 // take the same path as published ones.
-func New(store eventstore.Store, relay *khatru.Relay, registry *registry.Registry, logger *log.Logger) *Crawler {
+func New(store *index.Store, relay *khatru.Relay, registry *registry.Registry, logger *log.Logger) *Crawler {
 	return &Crawler{
 		store:      store,
 		relay:      relay,
@@ -190,7 +190,7 @@ func (c *Crawler) syncOne(ctx context.Context, relay registry.Relay) {
 	} else if err != nil {
 		c.log.Printf("sync of %s failed after %d new lists: %v", relay.URL, result.stored, err)
 	} else {
-		c.log.Printf("synced %s: %d new lists, %d windows, %d lists held", relay.URL, result.stored, len(result.boundaries)+1, result.lists)
+		c.log.Printf("synced %s: %d new lists out of %d fetched, %d windows, %d lists held", relay.URL, result.stored, result.fetched, len(result.boundaries)+1, result.lists)
 	}
 	if err := c.registry.Update(relay.URL, update); err != nil {
 		c.log.Printf("failed to record the sync of %s: %v", relay.URL, err)

@@ -12,6 +12,7 @@ import (
 	"fiatjaf.com/nostr/eventstore/lmdb"
 	"github.com/coder/websocket"
 
+	"nostr-indexer-relay/internal/index"
 	"nostr-indexer-relay/internal/registry"
 	indexer "nostr-indexer-relay/internal/relay"
 )
@@ -70,7 +71,7 @@ func TestProbeNIP77OnOurOwnRelay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	server := httptest.NewServer(indexer.New(indexer.Config{MaxLimit: 10}, store))
+	server := httptest.NewServer(indexer.New(indexer.Config{MaxLimit: 10}, index.New(store)))
 	defer server.Close()
 
 	if result := probeNIP77(context.Background(), http.DefaultClient, wsURL(server), true); result.status != registry.NIP77Supported || !result.counted || result.lists != 3 {

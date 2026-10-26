@@ -16,6 +16,8 @@ import (
 	"fiatjaf.com/nostr/nip77/negentropy"
 	"fiatjaf.com/nostr/nip77/negentropy/storage/vector"
 	"github.com/coder/websocket"
+
+	"nostr-indexer-relay/internal/index"
 )
 
 var skA = nostr.MustSecretKeyFromHex("0000000000000000000000000000000000000000000000000000000000000001")
@@ -205,14 +207,14 @@ func testConfig() Config {
 	}
 }
 
-func newTestStore(t *testing.T) *lmdb.LMDBBackend {
+func newTestStore(t *testing.T) *index.Store {
 	t.Helper()
-	store := &lmdb.LMDBBackend{Path: t.TempDir()}
-	if err := store.Init(); err != nil {
+	backend := &lmdb.LMDBBackend{Path: t.TempDir()}
+	if err := backend.Init(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(store.Close)
-	return store
+	t.Cleanup(backend.Close)
+	return index.New(backend)
 }
 
 func relayList(t *testing.T, sk nostr.SecretKey, createdAt nostr.Timestamp, relayURLs ...string) nostr.Event {

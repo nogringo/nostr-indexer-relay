@@ -10,18 +10,17 @@ import (
 	"strings"
 
 	"fiatjaf.com/nostr"
-	"fiatjaf.com/nostr/eventstore"
 	"fiatjaf.com/nostr/khatru"
 	"fiatjaf.com/nostr/nip11"
 
-	"nostr-indexer-relay/internal/scan"
+	"nostr-indexer-relay/internal/index"
 )
 
 // About 1950 authors at 67 bytes each, within defaultMaxLimit: a REQ that fits is never truncated.
 // It is also the size limit of every stored event, whatever its path.
 const MaxMessageSize = 128 << 10
 
-func New(cfg Config, store eventstore.Store) *khatru.Relay {
+func New(cfg Config, store *index.Store) *khatru.Relay {
 	relay := khatru.NewRelay()
 	relay.Addr = cfg.Addr
 	relay.ServiceURL = cfg.RelayURL
@@ -51,34 +50,19 @@ func New(cfg Config, store eventstore.Store) *khatru.Relay {
 
 	relay.OnEvent = acceptOnlyRelayLists
 	relay.UseEventstore(store, cfg.MaxLimit)
-	reportOlderListsAsDuplicates(relay, store)
 	serveFullNegentropySessions(relay, store, cmp.Or(cfg.NegentropyLimit, defaultNegentropyLimit))
 
 	return relay
 }
 
-// The store drops a list older than ours, or one it already has, without an error. khatru would
-// then broadcast it and call OnEventSaved, so such a list is reported as a duplicate instead.
-func reportOlderListsAsDuplicates(relay *khatru.Relay, store eventstore.Store) {
-	replace := relay.ReplaceEvent
-	relay.ReplaceEvent = func(ctx context.Context, event nostr.Event) error {
-		for current := range store.QueryEvents(nostr.Filter{Kinds: []nostr.Kind{event.Kind}, Authors: []nostr.PubKey{event.PubKey}}, 1) {
-			if !nostr.IsOlder(current, event) {
-				return eventstore.ErrDupEvent
-			}
-		}
-		return replace(ctx, event)
-	}
-}
-
 // khatru caps a negentropy session at 20 times the max limit and truncates the rest silently,
 // so a peer would never learn about older lists. Sessions are served in full instead, and
 // refused beyond limit with strfry's reason, which tells the peer to split its sync.
-func serveFullNegentropySessions(relay *khatru.Relay, store eventstore.Store, limit int) {
+func serveFullNegentropySessions(relay *khatru.Relay, store *index.Store, limit int) {
 	queryStored := relay.QueryStored
 	relay.QueryStored = func(ctx context.Context, filter nostr.Filter) iter.Seq[nostr.Event] {
 		if khatru.IsNegentropySession(ctx) {
-			return scan.Events(store, filter, scan.PageSize)
+			return store.NegentropyEvents(filter)
 		}
 		return queryStored(ctx, filter)
 	}
