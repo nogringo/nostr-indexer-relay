@@ -1,0 +1,15 @@
+services:
+  indexer-relay:
+    image: ghcr.io/nogringo/nostr-indexer-relay:main
+    container_name: nostr-indexer-relay
+    ports:
+      - "${PORT:-3334}:3334"
+    volumes:
+      - data:/app/data
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+
+volumes:
+  data:
