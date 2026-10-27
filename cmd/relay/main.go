@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"nostr-indexer-relay/internal/crawler"
 	"nostr-indexer-relay/internal/index"
+	"nostr-indexer-relay/internal/mmap"
 	"nostr-indexer-relay/internal/registry"
 	indexer "nostr-indexer-relay/internal/relay"
 	"nostr-indexer-relay/internal/web"
@@ -38,6 +40,9 @@ func run() error {
 		return fmt.Errorf("event store error: %w", err)
 	}
 	defer backend.Close()
+	if err := mmap.AdviseRandom(filepath.Join(cfg.LMDBPath, "data.mdb")); err != nil {
+		log.Printf("failed to turn off readahead on the event store: %v", err)
+	}
 	start := time.Now()
 	store := index.New(backend)
 	log.Printf("indexed %d relay lists in %s", store.Len(), time.Since(start).Round(time.Millisecond))
