@@ -44,6 +44,8 @@ type Relay struct {
 	TestedAt   time.Time   `json:"tested_at,omitzero"`
 	NextTestAt time.Time   `json:"next_test_at,omitzero"`
 	Failures   int         `json:"failures,omitempty"`
+	// A relay that held the same lists at the last test, and is synced and followed in place of this one.
+	AliasOf string `json:"alias_of,omitempty"`
 
 	SyncedAt     time.Time     `json:"synced_at,omitzero"`
 	NextSyncAt   time.Time     `json:"next_sync_at,omitzero"`
@@ -125,7 +127,39 @@ func Open(path string) (*Registry, error) {
 		env.Close()
 		return nil, err
 	}
+	if err := r.retestForAliases(); err != nil {
+		env.Close()
+		return nil, err
+	}
 	return r, nil
+}
+
+const aliasesRetestedKey = "aliases_retested"
+
+// retestForAliases makes due, once, every relay with a path or a query that passed the NIP-77
+// test before aliases were detected, rather than syncing it until its retest 7 days later.
+func (r *Registry) retestForAliases() error {
+	return r.env.Update(func(txn *lmdb.Txn) error {
+		if _, err := txn.Get(r.settings, []byte(aliasesRetestedKey)); err == nil {
+			return nil
+		} else if !lmdb.IsNotFound(err) {
+			return err
+		}
+		for _, relay := range r.relays {
+			if relay.NIP77 != NIP77Supported || relay.Seed || !strings.ContainsAny(strings.TrimPrefix(relay.URL, "wss://"), "/?") {
+				continue
+			}
+			relay.NextTestAt = time.Time{}
+			value, err := json.Marshal(relay)
+			if err != nil {
+				return err
+			}
+			if err := txn.Put(r.dbi, []byte(relay.URL), value, 0); err != nil {
+				return err
+			}
+		}
+		return txn.Put(r.settings, []byte(aliasesRetestedKey), []byte("1"), 0)
+	})
 }
 
 func (r *Registry) Close() {
@@ -219,10 +253,10 @@ func (r *Registry) Due(now time.Time, n int) []Relay {
 	return r.due(n, func(relay *Relay) bool { return !relay.NextTestAt.After(now) })
 }
 
-// DueForSync is like Due, for the relays that support NIP-77 and whose next sync is due.
+// DueForSync is like Due, for the relays that support NIP-77, are no alias, and whose next sync is due.
 func (r *Registry) DueForSync(now time.Time, n int) []Relay {
 	return r.due(n, func(relay *Relay) bool {
-		return relay.NIP77 == NIP77Supported && !relay.NextSyncAt.After(now)
+		return relay.NIP77 == NIP77Supported && relay.AliasOf == "" && !relay.NextSyncAt.After(now)
 	})
 }
 

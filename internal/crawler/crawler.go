@@ -118,15 +118,23 @@ func (c *Crawler) testRelays(ctx context.Context) {
 		for _, relay := range due {
 			wg.Go(func() {
 				result := probeNIP77(ctx, c.client, relay.URL, relay.ListsSource != registry.ListsSynced)
+				var alias string
+				if result.status == registry.NIP77Supported && !relay.Seed {
+					alias = aliasOf(ctx, c.client, relay.URL, c.trackedAncestors(relay.URL))
+				}
 				if ctx.Err() != nil {
 					return
 				}
-				if result.status == registry.NIP77Supported {
+				switch {
+				case alias != "":
+					c.log.Printf("%s is an alias of %s", relay.URL, alias)
+				case result.status == registry.NIP77Supported:
 					c.log.Printf("%s supports NIP-77", relay.URL)
 				}
 				now := time.Now()
 				if err := c.registry.Update(relay.URL, func(r *registry.Relay) {
 					recordTest(r, result.status, result.detail, now)
+					r.AliasOf = alias
 					if result.counted && r.ListsSource != registry.ListsSynced {
 						r.Lists, r.ListsSource, r.ListsAt = result.lists, registry.ListsCounted, now
 					}
@@ -137,6 +145,18 @@ func (c *Crawler) testRelays(ctx context.Context) {
 		}
 		wg.Wait()
 	}
+}
+
+// trackedAncestors returns the ancestors of url that are in the registry and not forgotten,
+// banned ones included, so that a ban covers the aliases of a relay.
+func (c *Crawler) trackedAncestors(url string) []string {
+	var tracked []string
+	for _, ancestor := range ancestors(url) {
+		if relay, ok := c.registry.Get(ancestor); ok && !relay.Forgotten() {
+			tracked = append(tracked, ancestor)
+		}
+	}
+	return tracked
 }
 
 func (c *Crawler) syncRelays(ctx context.Context) {

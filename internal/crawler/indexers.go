@@ -52,8 +52,11 @@ func indexFilled(relays []registry.Relay) bool {
 }
 
 // isIndexer tells whether relay holds share of our lists. Until our index is filled, and
-// until they are measured, the seeds are the indexers.
+// until they are measured, the seeds are the indexers. An alias never is.
 func isIndexer(relay registry.Relay, ours int, filled bool, share float64) bool {
+	if relay.AliasOf != "" {
+		return false
+	}
 	if !filled || relay.ListsSource == registry.ListsUnmeasured {
 		return relay.Seed
 	}

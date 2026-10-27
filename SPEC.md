@@ -82,6 +82,19 @@ Tests run 16 at a time, with a 10 second timeout each. A relay that answered is 
 
 NIP-11 is wrong in both directions: on 2026-10-26, indexer.coracle.social and relay.nos.social did not list 77 but support it.
 
+### Aliases
+
+The same relay is often reachable under several URLs, since many servers ignore the path. Since April 2026, throwaway keys publish lists that append random words to the URLs of real relays (`wss://indexer.coracle.social/vertex`, `wss://nos.lol/oscar-jade`), and bots that republish every relay URL they see keep these variants in circulation. On 2026-10-27, 20,370 of the 29,343 relays mentioned in our lists were such variants, 137 of them on the four default seeds, which all ignore the path. Each variant that passed the NIP-77 test was synced as a relay of its own, and one holding half of our lists would have been followed live as an indexer.
+
+- When a URL with a path or a query passes the NIP-77 test, it is compared with each of its ancestors in the registry: `wss://h/a/b?q` has `wss://h`, `wss://h/a` and `wss://h/a/b`. Forgotten ancestors are skipped. Banned ones are not, so that a ban covers the aliases of a relay.
+- The comparison opens a negentropy session at the same moment on the URL and on each ancestor, on `{"kinds":[10002],"until":<now>}` with an empty set on our side. The first answer depends only on the lists the relay holds. When a relay refuses the session, as strfry does beyond a million lists, the comparison is made again on the last 7 days.
+- When the URL and an ancestor give the same answer, and it is not the answer of an empty set, the URL is an alias of that ancestor, the shortest one if several match. Two URLs that hold the same lists at the same moment need only one sync, whether they are one server or not.
+- An alias is never synced, never followed live, even when forced, and never an indexer.
+- Aliases are retested like any relay. A host that starts serving different relays on different paths loses its aliases at the next test.
+- The relays with a path or a query that passed the test before aliases were detected are retested once, at the first start of the version that detects them.
+- Seeds are never aliases: the admin chose them.
+- Variants on other subdomains are not detected.
+
 ### Relay registry
 
 For each relay the registry keeps:
@@ -91,6 +104,7 @@ For each relay the registry keeps:
 - Unique contribution: 10002 received from this relay that no indexer had delivered.
 - Health: last success, consecutive failures.
 - Whether it is an indexer, and whether it has a live subscription.
+- The relay it is an alias of, if any.
 
 ### Sync and revisit
 
@@ -141,7 +155,7 @@ Pages are rendered on the server, with a single script for NIP-07 signing. They 
 ### Admin (`/admin`)
 
 - Dashboard: indexed pubkeys, new or updated 10002 stored per day (UTC, last 30 days, from publications and from the crawler), active live subscriptions, detected indexers.
-- Relay registry: for each relay its NIP-77 status, activity, unique contribution, and live state, filtered by state and searched by URL, 100 relays per page. Actions: rerun the test, force a sync, ban the relay, force live.
+- Relay registry: for each relay its NIP-77 status, activity, unique contribution, and live state, filtered by state and searched by URL, 100 relays per page. Actions: rerun the test, force a sync, ban the relay, force live. An alias shows the relay it stands for and offers neither a sync nor live.
 - A banned relay is no longer tested, synced or followed live. A relay forced live is followed whether it is an indexer or not, outside the live cap, as long as its NIP-77 test passed. The crawler picks up an action within a minute.
 - Settings: seeds, allowed ports, the indexer threshold, the live cap, the days before a quiet relay stops being followed live, and the switch for the visitor interface. Settings are stored in the database, so nothing has to be configured through files. A change starts a discovery right away, so that new seeds and ports apply.
 

@@ -14,7 +14,7 @@
 <thead><tr><th>Relay</th><th class="num">Lists mentioning it</th><th>NIP-77</th><th class="num">Lists held</th><th>Last sync</th><th class="num">Unique lists</th><th>Live</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
 <tbody>
 {{range .Relays}}<tr>
-<td class="url">{{.URL}}{{if .Seed}} <span class="tag">seed</span>{{end}}{{if .Indexer}} <span class="tag">indexer</span>{{end}}{{if .Banned}} <span class="tag bad">banned</span>{{end}}</td>
+<td class="url">{{.URL}}{{if .Seed}} <span class="tag">seed</span>{{end}}{{if .Indexer}} <span class="tag">indexer</span>{{end}}{{if .Banned}} <span class="tag bad">banned</span>{{end}}{{with .AliasOf}} <span class="tag">alias of {{.}}</span>{{end}}</td>
 <td class="num">{{number .Popularity}}</td>
 <td{{with .Detail}} title="{{.}}"{{end}}>{{status .}}{{if not .TestedAt.IsZero}}<br><span class="muted">{{with .Failures}}{{failures .}}, {{end}}tested {{ago .TestedAt}}</span>{{end}}</td>
 <td class="num">{{if .ListsSource}}{{number .Lists}}<br><span class="muted">{{if eq .ListsSource "sync"}}synced{{else}}counted{{end}}</span>{{else}}<span class="muted">unknown</span>{{end}}</td>
@@ -26,8 +26,8 @@
 <input type="hidden" name="url" value="{{.URL}}">
 <input type="hidden" name="return" value="{{$.Return}}">
 <button name="action" value="test">Test</button>
-{{if eq .NIP77 "supported"}}<button name="action" value="sync">Sync</button>{{end}}
-{{if .ForceLive}}<button name="action" value="unforce-live">Stop forcing live</button>{{else if eq .NIP77 "supported"}}<button name="action" value="force-live">Force live</button>{{end}}
+{{if and (eq .NIP77 "supported") (not .AliasOf)}}<button name="action" value="sync">Sync</button>{{end}}
+{{if .ForceLive}}<button name="action" value="unforce-live">Stop forcing live</button>{{else if and (eq .NIP77 "supported") (not .AliasOf)}}<button name="action" value="force-live">Force live</button>{{end}}
 {{if .Banned}}<button name="action" value="unban">Unban</button>{{else}}<button name="action" value="ban" class="danger">Ban</button>{{end}}
 </form>
 </td>

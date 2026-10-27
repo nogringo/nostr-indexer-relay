@@ -172,6 +172,7 @@ var relayFilters = []relayFilter{
 	{"supported", "NIP-77 supported", func(r registry.Relay) bool { return r.NIP77 == registry.NIP77Supported }},
 	{"indexers", "Indexers", func(r registry.Relay) bool { return r.Indexer }},
 	{"live", "Live", func(r registry.Relay) bool { return r.Live }},
+	{"aliases", "Aliases", func(r registry.Relay) bool { return r.AliasOf != "" }},
 	{"untested", "Untested", func(r registry.Relay) bool { return r.NIP77 == registry.NIP77Unknown && !r.Forgotten() }},
 	{"unsupported", "NIP-77 unsupported", func(r registry.Relay) bool { return r.NIP77 == registry.NIP77Unsupported }},
 	{"unreachable", "Unreachable", func(r registry.Relay) bool { return r.NIP77 == registry.NIP77Unreachable }},
