@@ -6,7 +6,6 @@ require (
 	fiatjaf.com/nostr v0.0.0-20260701134336-94cc8043858a
 	github.com/PowerDNS/lmdb-go v1.9.3
 	github.com/coder/websocket v1.8.13
-	github.com/google/btree v1.1.3
 )
 
 require (

@@ -18,12 +18,11 @@ func Events(store eventstore.Store, filter nostr.Filter, pageSize int) iter.Seq[
 		for {
 			read := 0
 			var oldest nostr.Timestamp
-			idsAtOldest := make(map[nostr.ID]bool)
+			var idsAtOldest map[nostr.ID]bool
 			for event := range store.QueryEvents(filter, pageSize) {
 				read++
-				if event.CreatedAt != oldest {
-					oldest = event.CreatedAt
-					clear(idsAtOldest)
+				if idsAtOldest == nil || event.CreatedAt != oldest {
+					oldest, idsAtOldest = event.CreatedAt, make(map[nostr.ID]bool)
 				}
 				idsAtOldest[event.ID] = true
 				if seenAtUntil[event.ID] {

@@ -17,10 +17,6 @@ func (c *Crawler) ingest(ctx context.Context, event nostr.Event) bool {
 	if event.Kind != nostr.KindRelayListMetadata || nip70.IsProtected(event) || len(event.String()) > indexer.MaxMessageSize {
 		return false
 	}
-	// A relay may hold lists older than ours, and verifying a signature costs far more than this lookup.
-	if c.store.Stale(event) {
-		return false
-	}
 	// VerifySignature trusts the announced id, so the id is recomputed first.
 	if !event.CheckID() || !event.VerifySignature() {
 		return false

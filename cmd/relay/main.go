@@ -15,7 +15,6 @@ import (
 	"fiatjaf.com/nostr/eventstore/lmdb"
 
 	"nostr-indexer-relay/internal/crawler"
-	"nostr-indexer-relay/internal/index"
 	"nostr-indexer-relay/internal/registry"
 	indexer "nostr-indexer-relay/internal/relay"
 	"nostr-indexer-relay/internal/web"
@@ -33,14 +32,11 @@ func run() error {
 		return fmt.Errorf("configuration error: %w", err)
 	}
 
-	backend := &lmdb.LMDBBackend{Path: cfg.LMDBPath}
-	if err := backend.Init(); err != nil {
+	store := &lmdb.LMDBBackend{Path: cfg.LMDBPath}
+	if err := store.Init(); err != nil {
 		return fmt.Errorf("event store error: %w", err)
 	}
-	defer backend.Close()
-	start := time.Now()
-	store := index.New(backend)
-	log.Printf("indexed %d relay lists in %s", store.Len(), time.Since(start).Round(time.Millisecond))
+	defer store.Close()
 
 	relays, err := registry.Open(cfg.StatePath)
 	if err != nil {
