@@ -14,7 +14,6 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore/lmdb"
 
-	"nostr-indexer-relay/internal/crawler"
 	"nostr-indexer-relay/internal/registry"
 	indexer "nostr-indexer-relay/internal/relay"
 	"nostr-indexer-relay/internal/web"
@@ -38,27 +37,25 @@ func run() error {
 	}
 	defer store.Close()
 
-	relays, err := registry.Open(cfg.StatePath)
+	state, err := registry.Open(cfg.StatePath)
 	if err != nil {
-		return fmt.Errorf("relay registry error: %w", err)
+		return fmt.Errorf("state database error: %w", err)
 	}
-	defer relays.Close()
+	defer state.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	relay := indexer.New(cfg, store)
-	relay.OnEventSaved = func(context.Context, nostr.Event) { relays.CountStored(time.Now()) }
-	crawl := crawler.New(store, relay, relays, log.New(os.Stderr, "[crawler] ", log.LstdFlags))
+	relay.OnEventSaved = func(context.Context, nostr.Event) { state.CountStored(time.Now()) }
 
 	site := web.New(web.Config{
-		Name:            cfg.Name,
-		PublicURL:       cfg.RelayURL,
-		Store:           store,
-		Registry:        relays,
-		AdminPubKey:     cfg.AdminPubKey,
-		SettingsChanged: crawl.Rediscover,
-		Log:             log.New(os.Stderr, "[admin] ", log.LstdFlags),
+		Name:        cfg.Name,
+		PublicURL:   cfg.RelayURL,
+		Store:       store,
+		Registry:    state,
+		AdminPubKey: cfg.AdminPubKey,
+		Log:         log.New(os.Stderr, "[admin] ", log.LstdFlags),
 	})
 	site.Register(relay.Router())
 	if link, ok := site.SetupLink(web.BaseURL(cfg.RelayURL, cfg.Addr)); ok {
@@ -71,18 +68,9 @@ func run() error {
 		server.Shutdown(context.Background())
 	}()
 
-	crawlerDone := make(chan struct{})
-	go func() {
-		defer close(crawlerDone)
-		crawl.Run(ctx)
-	}()
-
 	log.Printf("nostr indexer relay listening on %s", cfg.Addr)
-	serveErr := server.ListenAndServe()
-	stop()
-	<-crawlerDone
-	if !errors.Is(serveErr, http.ErrServerClosed) {
-		return fmt.Errorf("relay stopped: %w", serveErr)
+	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("relay stopped: %w", err)
 	}
 	return nil
 }

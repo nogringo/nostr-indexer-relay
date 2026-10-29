@@ -2,7 +2,6 @@ package registry
 
 import (
 	"bytes"
-	"slices"
 	"testing"
 	"time"
 
@@ -12,16 +11,14 @@ import (
 func TestSettingsStartAtTheDefaultsAndSurviveReopening(t *testing.T) {
 	path := t.TempDir()
 	r := openTestRegistry(t, path)
-	if got := r.Settings(); !slices.Equal(got.Seeds, DefaultSettings().Seeds) || got.LiveCap != 50 || got.IndexerShare != 0.5 {
+	if got := r.Settings(); !got.Visitors {
 		t.Fatalf("expected the defaults, got %+v", got)
 	}
 	if _, ok := r.Admin(); ok {
 		t.Fatal("expected no admin on a new registry")
 	}
 
-	settings := r.Settings()
-	settings.Seeds, settings.AllowedPorts, settings.LiveCap = []string{"wss://seed.example.com"}, []int{7777}, 10
-	if err := r.SetSettings(settings); err != nil {
+	if err := r.SetSettings(Settings{Visitors: false}); err != nil {
 		t.Fatal(err)
 	}
 	admin := nostr.Generate().Public()
@@ -32,8 +29,7 @@ func TestSettingsStartAtTheDefaultsAndSurviveReopening(t *testing.T) {
 	r.Close()
 
 	reopened := openTestRegistry(t, path)
-	got := reopened.Settings()
-	if !slices.Equal(got.Seeds, settings.Seeds) || !slices.Equal(got.AllowedPorts, settings.AllowedPorts) || got.LiveCap != 10 || got.LiveQuietPeriod != settings.LiveQuietPeriod {
+	if got := reopened.Settings(); got.Visitors {
 		t.Errorf("expected the saved settings, got %+v", got)
 	}
 	if stored, ok := reopened.Admin(); !ok || stored != admin {
@@ -63,20 +59,12 @@ func TestStoredPerDayCountsEachUTCDay(t *testing.T) {
 	}
 }
 
-func TestDueSkipsBannedRelays(t *testing.T) {
-	r := openTestRegistry(t, t.TempDir())
-	if err := r.SetPopularity(map[string]int{"wss://banned.example.com": 5, "wss://other.example.com": 1}, nil); err != nil {
+func openTestRegistry(t *testing.T, path string) *Registry {
+	t.Helper()
+	r, err := Open(path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Update("wss://banned.example.com", func(relay *Relay) { relay.Banned, relay.NIP77 = true, NIP77Supported }); err != nil {
-		t.Fatal(err)
-	}
-
-	now := time.Now()
-	if due := r.Due(now, 10); len(due) != 1 || due[0].URL != "wss://other.example.com" {
-		t.Errorf("expected only the other relay to be tested, got %+v", due)
-	}
-	if due := r.DueForSync(now, 10); len(due) != 0 {
-		t.Errorf("expected the banned relay not to be synced, got %+v", due)
-	}
+	t.Cleanup(r.Close)
+	return r
 }

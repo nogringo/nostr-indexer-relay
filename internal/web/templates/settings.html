@@ -1,38 +1,8 @@
 {{define "content"}}<h1>Settings</h1>
 <form class="settings" method="post" action="/admin/settings" novalidate>
 <div class="field">
-<label for="seeds">Seed relays</label>
-<p class="help" id="seeds-help">One wss:// URL per line. The crawler starts from these relays, tests them first and counts them as indexers until it measures them.</p>
-<textarea id="seeds" name="seeds" rows="6" spellcheck="false" aria-describedby="seeds-help">{{.Seeds}}</textarea>
-{{with .Errors.seeds}}<p class="error">{{.}}</p>{{end}}
-</div>
-<div class="field">
-<label for="ports">Allowed ports</label>
-<p class="help" id="ports-help">Ports other than 443 that relay URLs may use, separated by commas. Leave empty to reach port 443 only.</p>
-<input id="ports" name="ports" value="{{.Ports}}" inputmode="numeric" aria-describedby="ports-help">
-{{with .Errors.ports}}<p class="error">{{.}}</p>{{end}}
-</div>
-<div class="field">
-<label for="indexer-share">Indexer threshold, in percent</label>
-<p class="help" id="indexer-share-help">A relay that holds this share of the lists we know counts as an indexer, and is always followed live.</p>
-<input id="indexer-share" name="indexer_share" value="{{.IndexerShare}}" inputmode="decimal" aria-describedby="indexer-share-help">
-{{with .Errors.indexer_share}}<p class="error">{{.}}</p>{{end}}
-</div>
-<div class="field">
-<label for="live-cap">Non-indexers followed live</label>
-<p class="help" id="live-cap-help">The most non-indexers followed live at once, keeping the ones that bring the most lists the indexers miss. Indexers and relays forced live are not counted.</p>
-<input id="live-cap" name="live_cap" value="{{.LiveCap}}" inputmode="numeric" aria-describedby="live-cap-help">
-{{with .Errors.live_cap}}<p class="error">{{.}}</p>{{end}}
-</div>
-<div class="field">
-<label for="quiet-days">Days before a quiet relay stops being followed live</label>
-<p class="help" id="quiet-days-help">A non-indexer that brings no list the indexers miss for this many days is only visited by negentropy sync.</p>
-<input id="quiet-days" name="quiet_days" value="{{.QuietDays}}" inputmode="numeric" aria-describedby="quiet-days-help">
-{{with .Errors.quiet_days}}<p class="error">{{.}}</p>{{end}}
-</div>
-<div class="field">
 <label class="check"><input type="checkbox" name="visitors"{{if .Visitors}} checked{{end}} aria-describedby="visitors-help"> Public search page</label>
-<p class="help" id="visitors-help">Lets anyone look up a pubkey's relay list on the home page, and shows the most listed relays. When it is off, the relay, NIP-11 and this admin keep working.</p>
+<p class="help" id="visitors-help">Lets anyone look up a pubkey's relay list on the home page. When it is off, the relay, NIP-11 and this admin keep working.</p>
 </div>
 <button class="primary">Save settings</button>
 </form>

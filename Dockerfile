@@ -16,9 +16,6 @@ RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o relay ./cmd/relay
 
 FROM alpine:latest
 
-# The crawler dials wss:// relays
-RUN apk --no-cache add ca-certificates
-
 RUN addgroup -S relay && adduser -S relay -G relay
 
 WORKDIR /app

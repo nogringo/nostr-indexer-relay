@@ -12,7 +12,6 @@
 <a class="name" href="/admin">{{.Relay}}</a>
 <nav aria-label="Admin">
 <a href="/admin"{{if eq .Nav "overview"}} aria-current="page"{{end}}>Overview</a>
-<a href="/admin/relays"{{if eq .Nav "relays"}} aria-current="page"{{end}}>Relays</a>
 <a href="/admin/settings"{{if eq .Nav "settings"}} aria-current="page"{{end}}>Settings</a>
 </nav>
 <form method="post" action="/admin/logout"><button class="quiet">Sign out</button></form>

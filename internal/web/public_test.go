@@ -7,20 +7,12 @@ import (
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
-
-	"nostr-indexer-relay/internal/registry"
 )
 
 func TestHomeShowsTheStatsAndTheRelayURL(t *testing.T) {
 	ta := newTestAdmin(t, nil)
 	for range 3 {
-		saveList(t, ta, nostr.Generate(), nostr.Tags{{"r", "wss://popular.example.com"}})
-	}
-	if err := ta.Registry.SetPopularity(map[string]int{"wss://popular.example.com": 3, "wss://rare.example.com": 1, "wss://banned.example.com": 2}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := ta.Registry.Update("wss://banned.example.com", func(r *registry.Relay) { r.Banned = true }); err != nil {
-		t.Fatal(err)
+		saveList(t, ta, nostr.Generate(), nostr.Tags{{"r", "wss://relay.example.com"}})
 	}
 
 	response := ta.send(t, http.MethodGet, "/", "", nil, "")
@@ -32,16 +24,10 @@ func TestHomeShowsTheStatsAndTheRelayURL(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("got %d", status)
 	}
-	for _, want := range []string{"3 relay lists indexed", "ws://" + strings.TrimPrefix(ta.server.URL, "http://") + "/", "100.0%", "33.3%"} {
+	for _, want := range []string{"3 relay lists indexed", "ws://" + strings.TrimPrefix(ta.server.URL, "http://") + "/"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected %q on the home page", want)
 		}
-	}
-	if popular, rare := strings.Index(body, "wss://popular.example.com"), strings.Index(body, "wss://rare.example.com"); popular < 0 || rare < popular {
-		t.Error("expected the most listed relays first")
-	}
-	if strings.Contains(body, "wss://banned.example.com") {
-		t.Error("expected banned relays to stay out of the public stats")
 	}
 }
 

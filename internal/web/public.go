@@ -1,33 +1,25 @@
 package web
 
 import (
-	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
-
-	"nostr-indexer-relay/internal/registry"
 )
 
-const (
-	topRelays = 20
-	// Counting every list takes a while on a full index, so a public page does it at most this often.
-	publicStatsMaxAge = time.Minute
-)
+// Counting every list takes a while on a full index, so a public page does it at most this often.
+const publicStatsMaxAge = time.Minute
 
 var relayListsFilter = nostr.Filter{Kinds: []nostr.Kind{nostr.KindRelayListMetadata}}
 
 type publicStats struct {
 	at    time.Time
 	lists int
-	top   []registry.Relay
 }
 
 // requireVisitors serves the public pages only while the admin keeps them on.
@@ -51,14 +43,6 @@ type homeData struct {
 	Error    string
 	RelayURL string
 	Lists    int
-	Top      []topRelay
-}
-
-type topRelay struct {
-	Rank  int
-	URL   string
-	Lists int
-	Share string
 }
 
 func (s *Site) home(w http.ResponseWriter, r *http.Request) {
@@ -85,10 +69,6 @@ func (s *Site) renderHome(w http.ResponseWriter, r *http.Request, status int, qu
 		return
 	}
 	data := homeData{page: s.publicPage("Look up a relay list"), Query: query, Error: message, RelayURL: s.relayURL(r), Lists: stats.lists}
-	for i, relay := range stats.top {
-		share := fmt.Sprintf("%.1f%%", 100*float64(relay.Popularity)/float64(max(1, stats.lists)))
-		data.Top = append(data.Top, topRelay{Rank: i + 1, URL: relay.URL, Lists: relay.Popularity, Share: share})
-	}
 	s.render(w, status, "home", data)
 }
 
@@ -103,16 +83,7 @@ func (s *Site) publicStats() (publicStats, error) {
 	if err != nil {
 		return publicStats{}, err
 	}
-	var top []registry.Relay
-	for _, relay := range s.Registry.All() {
-		if relay.Popularity > 0 && !relay.Banned {
-			top = append(top, relay)
-		}
-	}
-	slices.SortFunc(top, func(a, b registry.Relay) int {
-		return cmp.Or(cmp.Compare(b.Popularity, a.Popularity), strings.Compare(a.URL, b.URL))
-	})
-	s.stats = publicStats{at: time.Now(), lists: int(lists), top: top[:min(topRelays, len(top))]}
+	s.stats = publicStats{at: time.Now(), lists: int(lists)}
 	return s.stats, nil
 }
 

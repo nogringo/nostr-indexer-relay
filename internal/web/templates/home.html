@@ -20,13 +20,6 @@
 
 <section>
 <h2>{{number .Lists}} relay lists indexed</h2>
-<p class="note">One list per pubkey. The relay gathers them from across the network and keeps them up to date.</p>
-{{if .Top}}<h3>Most listed relays</h3>
-<div class="table-scroll">
-<table>
-<thead><tr><th class="num">Rank</th><th>Relay</th><th class="num">Listed by</th><th class="num">Share</th></tr></thead>
-<tbody>{{range .Top}}<tr><td class="num">{{.Rank}}</td><td class="url">{{.URL}}</td><td class="num">{{number .Lists}}</td><td class="num">{{.Share}}</td></tr>{{end}}</tbody>
-</table>
-</div>{{end}}
+<p class="note">One list per pubkey, the newest published to this relay.</p>
 </section>
 {{end}}

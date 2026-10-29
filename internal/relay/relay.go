@@ -18,15 +18,14 @@ import (
 )
 
 // About 1950 authors at 67 bytes each, within defaultMaxLimit: a REQ that fits is never truncated.
-// It is also the size limit of every stored event, whatever its path.
-const MaxMessageSize = 128 << 10
+const maxMessageSize = 128 << 10
 
 func New(cfg Config, store eventstore.Store) *khatru.Relay {
 	relay := khatru.NewRelay()
 	relay.Addr = cfg.Addr
 	relay.ServiceURL = cfg.RelayURL
 	relay.Negentropy = true
-	relay.MaxMessageSize = MaxMessageSize
+	relay.MaxMessageSize = maxMessageSize
 
 	relay.Info.Name = cfg.Name
 	relay.Info.Description = cfg.Description

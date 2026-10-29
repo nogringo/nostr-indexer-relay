@@ -131,15 +131,6 @@ h2 {
   font-size: 0.85em;
 }
 
-.good {
-  color: var(--good);
-  font-weight: 600;
-}
-
-.bad {
-  color: var(--bad);
-}
-
 .url {
   overflow-wrap: anywhere;
 }
@@ -151,22 +142,6 @@ td.url {
 
 .nowrap {
   white-space: nowrap;
-}
-
-.tag {
-  display: inline-block;
-  white-space: nowrap;
-  padding: 0 0.45rem;
-  border: 1px solid var(--rule);
-  border-radius: 999px;
-  color: var(--ink-muted);
-  font-size: 0.75rem;
-  line-height: 1.5;
-}
-
-.tag.bad {
-  border-color: currentColor;
-  color: var(--bad);
 }
 
 .table-scroll,
@@ -207,15 +182,6 @@ tbody tr:last-child td {
 
 .num {
   text-align: right;
-}
-
-td .muted {
-  white-space: nowrap;
-}
-
-.empty {
-  color: var(--ink-muted);
-  padding: 1.5rem 0;
 }
 
 table.compact {
@@ -262,10 +228,6 @@ button.primary {
   font-weight: 600;
 }
 
-button.danger {
-  color: var(--bad);
-}
-
 button.quiet {
   border: none;
   background: none;
@@ -278,46 +240,13 @@ button.quiet:hover {
   color: var(--ink);
 }
 
-.actions {
-  display: flex;
-  gap: 0.35rem;
-}
-
-input,
-select,
-textarea {
+input {
   font: inherit;
   color: var(--ink);
   background: var(--surface);
   border: 1px solid var(--rule);
   border-radius: 5px;
   padding: 0.45rem 0.6rem;
-}
-
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.75rem 1rem;
-  margin-bottom: 1rem;
-}
-
-.filters label {
-  display: grid;
-  gap: 0.25rem;
-  color: var(--ink-muted);
-  font-size: 0.85rem;
-}
-
-.filters button {
-  padding: 0.5rem 0.9rem;
-  font-size: 0.95rem;
-}
-
-.pages {
-  display: flex;
-  gap: 1.5rem;
-  margin-top: 1rem;
 }
 
 .settings {
@@ -337,15 +266,6 @@ textarea {
   margin: 0.15rem 0 0.5rem;
   color: var(--ink-muted);
   font-size: 0.9rem;
-}
-
-.field textarea,
-.field input {
-  width: 100%;
-}
-
-.field input {
-  max-width: 14rem;
 }
 
 .error {
@@ -536,8 +456,4 @@ table.list td:not(.url) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-}
-
-.field label.check input {
-  width: auto;
 }

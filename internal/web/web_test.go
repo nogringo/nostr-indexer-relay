@@ -10,7 +10,6 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -114,10 +113,10 @@ func TestAdminPagesNeedASession(t *testing.T) {
 	admin := skA.Public()
 	ta := newTestAdmin(t, &admin)
 
-	if status, body := ta.get(t, "/admin/relays"); status != http.StatusUnauthorized || !strings.Contains(body, "Sign in to Test relay") {
+	if status, body := ta.get(t, "/admin/settings"); status != http.StatusUnauthorized || !strings.Contains(body, "Sign in to Test relay") {
 		t.Errorf("expected the sign-in page, got %d", status)
 	}
-	if status, _ := ta.postForm(t, "/admin/settings", url.Values{"live_cap": {"1"}}, ""); status != http.StatusUnauthorized {
+	if status, _ := ta.postForm(t, "/admin/settings", url.Values{"visitors": {"on"}}, ""); status != http.StatusUnauthorized {
 		t.Errorf("expected a post without session to be refused, got %d", status)
 	}
 
@@ -129,117 +128,30 @@ func TestAdminPagesNeedASession(t *testing.T) {
 	}
 }
 
-func TestRelayActions(t *testing.T) {
-	ta := newSignedInAdmin(t)
-	const relayURL = "wss://relay.example.com"
-	if err := ta.Registry.SetPopularity(map[string]int{relayURL: 1}, nil); err != nil {
-		t.Fatal(err)
-	}
-
-	status, location := ta.postFormLocation(t, "/admin/relays", url.Values{"url": {relayURL}, "action": {"ban"}, "return": {"status=banned&q=relay&next=https://evil.example.com"}}, "")
-	if status != http.StatusSeeOther || location != "/admin/relays?q=relay&status=banned" {
-		t.Errorf("expected a redirect back to the same view, got %d %q", status, location)
-	}
-	if relay, _ := ta.Registry.Get(relayURL); !relay.Banned {
-		t.Error("expected the relay to be banned")
-	}
-
-	for _, test := range []struct {
-		name   string
-		form   url.Values
-		origin string
-		want   int
-	}{
-		{"unknown action", url.Values{"url": {relayURL}, "action": {"delete"}}, "", http.StatusBadRequest},
-		{"unknown relay", url.Values{"url": {"wss://unknown.example.com"}, "action": {"ban"}}, "", http.StatusNotFound},
-		{"another site", url.Values{"url": {relayURL}, "action": {"unban"}}, "https://evil.example.com", http.StatusForbidden},
-	} {
-		if status, _ := ta.postForm(t, "/admin/relays", test.form, test.origin); status != test.want {
-			t.Errorf("%s: got %d, want %d", test.name, status, test.want)
-		}
-	}
-	if relay, _ := ta.Registry.Get(relayURL); !relay.Banned {
-		t.Error("expected a refused action to leave the relay alone")
-	}
-}
-
 func TestSaveSettings(t *testing.T) {
 	ta := newSignedInAdmin(t)
 
-	valid := url.Values{
-		"seeds":         {"wss://seed.example.com/\nwss://seed.example.com\n  wss://other.example.com:7777  \n"},
-		"ports":         {"7777, 443"},
-		"indexer_share": {"40"},
-		"live_cap":      {"20"},
-		"quiet_days":    {"3"},
+	if status, _ := ta.postForm(t, "/admin/settings", url.Values{}, ""); status != http.StatusSeeOther || ta.Registry.Settings().Visitors {
+		t.Errorf("expected the unchecked box to turn the public page off, got %d", status)
 	}
-	if status, _ := ta.postForm(t, "/admin/settings", valid, ""); status != http.StatusSeeOther {
-		t.Fatalf("expected the settings to be saved, got %d", status)
-	}
-	saved := ta.Registry.Settings()
-	if !slices.Equal(saved.Seeds, []string{"wss://seed.example.com", "wss://other.example.com:7777"}) || !slices.Equal(saved.AllowedPorts, []int{7777}) ||
-		saved.IndexerShare != 0.4 || saved.LiveCap != 20 || saved.LiveQuietPeriod != 3*day || saved.Visitors {
-		t.Errorf("unexpected settings %+v", saved)
-	}
-	if ta.changed != 1 {
-		t.Errorf("expected the crawler to be told once, got %d", ta.changed)
-	}
-
-	valid.Set("visitors", "on")
-	if status, _ := ta.postForm(t, "/admin/settings", valid, ""); status != http.StatusSeeOther || !ta.Registry.Settings().Visitors {
+	if status, _ := ta.postForm(t, "/admin/settings", url.Values{"visitors": {"on"}}, ""); status != http.StatusSeeOther || !ta.Registry.Settings().Visitors {
 		t.Errorf("expected the checked box to turn the public page on, got %d", status)
 	}
-	saved = ta.Registry.Settings()
-
-	invalid := url.Values{"seeds": {"wss://seed.example.com:8080"}, "ports": {"http"}, "indexer_share": {"0"}, "live_cap": {"-1"}, "quiet_days": {"0"}}
-	status, body := ta.postForm(t, "/admin/settings", invalid, "")
-	if status != http.StatusBadRequest {
-		t.Fatalf("expected invalid settings to be refused, got %d", status)
-	}
-	for _, message := range []string{"is not a port number", "port 8080 is not allowed", "above 0 and up to 100", "0 or more", "1 or more"} {
-		if !strings.Contains(body, message) {
-			t.Errorf("expected the error %q on the page", message)
-		}
-	}
-	if !strings.Contains(body, "wss://seed.example.com:8080") {
-		t.Error("expected the form to keep what was typed")
-	}
-
-	if _, body := ta.postForm(t, "/admin/settings", url.Values{"seeds": {" "}, "indexer_share": {"50"}, "live_cap": {"1"}, "quiet_days": {"1"}}, ""); !strings.Contains(body, "Add at least one seed relay") {
-		t.Error("expected a seed to be required")
-	}
-	if got := ta.Registry.Settings(); !slices.Equal(got.Seeds, saved.Seeds) || !got.Visitors || ta.changed != 2 {
-		t.Errorf("expected refused settings to change nothing, got %+v", got)
+	if status, _ := ta.postForm(t, "/admin/settings", url.Values{}, "https://evil.example.com"); status != http.StatusForbidden || !ta.Registry.Settings().Visitors {
+		t.Errorf("expected a post from another site to be refused, got %d", status)
 	}
 }
 
 func TestPagesRender(t *testing.T) {
 	ta := newSignedInAdmin(t)
-	counts := make(map[string]int)
-	for i := range 150 {
-		counts[fmt.Sprintf("wss://relay%03d.example.com", i)] = i + 1
-	}
-	if err := ta.Registry.SetPopularity(counts, []string{"wss://seed.example.com"}); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	if err := ta.Registry.Update("wss://seed.example.com", func(r *registry.Relay) {
-		r.NIP77, r.Indexer, r.Live, r.Lists, r.ListsSource, r.ListsAt = registry.NIP77Supported, true, true, 1234567, registry.ListsSynced, now
-		r.SyncedAt, r.SyncDetail, r.ForceLive = now, "notice: rate limited", true
-	}); err != nil {
-		t.Fatal(err)
-	}
-	ta.Registry.CountStored(now)
+	ta.Registry.CountStored(time.Now())
 
 	for _, test := range []struct {
 		path string
 		want []string
 	}{
-		{"/admin", []string{"pubkeys indexed", "wss://seed.example.com", "1,234,567", "Show the numbers"}},
-		{"/admin/relays", []string{"wss://seed.example.com", "wss://relay149.example.com", "Next page", "Stop forcing live", "failed"}},
-		{"/admin/relays?status=supported&q=SEED", []string{"wss://seed.example.com", "1 relays"}},
-		{"/admin/relays?page=2", []string{"Previous page", "wss://relay000.example.com"}},
-		{"/admin/settings", []string{"wss://indexer.coracle.social", "Save settings", "npub1"}},
+		{"/admin", []string{"pubkeys indexed", "Show the numbers"}},
+		{"/admin/settings", []string{"Public search page", "checked", "Save settings", "npub1"}},
 		{"/static/admin.js", []string{"signEvent"}},
 	} {
 		status, body := ta.get(t, test.path)
@@ -270,9 +182,8 @@ func TestBaseURL(t *testing.T) {
 
 type testAdmin struct {
 	*Site
-	server  *httptest.Server
-	client  *http.Client
-	changed int
+	server *httptest.Server
+	client *http.Client
 }
 
 func newTestAdmin(t *testing.T, fixedAdmin *nostr.PubKey) *testAdmin {
@@ -282,20 +193,19 @@ func newTestAdmin(t *testing.T, fixedAdmin *nostr.PubKey) *testAdmin {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
-	relays, err := registry.Open(t.TempDir())
+	state, err := registry.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(relays.Close)
+	t.Cleanup(state.Close)
 
 	ta := &testAdmin{}
 	ta.Site = New(Config{
-		Name:            "Test relay",
-		Store:           store,
-		Registry:        relays,
-		AdminPubKey:     fixedAdmin,
-		SettingsChanged: func() { ta.changed++ },
-		Log:             log.New(io.Discard, "", 0),
+		Name:        "Test relay",
+		Store:       store,
+		Registry:    state,
+		AdminPubKey: fixedAdmin,
+		Log:         log.New(io.Discard, "", 0),
 	})
 	mux := http.NewServeMux()
 	ta.Register(mux)
@@ -342,13 +252,6 @@ func (ta *testAdmin) get(t *testing.T, path string) (int, string) {
 func (ta *testAdmin) postForm(t *testing.T, path string, form url.Values, origin string) (int, string) {
 	t.Helper()
 	return ta.do(t, http.MethodPost, path, "application/x-www-form-urlencoded", strings.NewReader(form.Encode()), origin)
-}
-
-func (ta *testAdmin) postFormLocation(t *testing.T, path string, form url.Values, origin string) (int, string) {
-	t.Helper()
-	response := ta.send(t, http.MethodPost, path, "application/x-www-form-urlencoded", strings.NewReader(form.Encode()), origin)
-	response.Body.Close()
-	return response.StatusCode, response.Header.Get("Location")
 }
 
 func (ta *testAdmin) do(t *testing.T, method, path, contentType string, body io.Reader, origin string) (int, string) {
