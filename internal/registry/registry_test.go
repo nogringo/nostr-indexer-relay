@@ -1,12 +1,10 @@
 package registry
 
 import (
-	"slices"
 	"testing"
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/PowerDNS/lmdb-go/lmdb"
 )
 
 func TestSetPopularityAddsAndResetsRelays(t *testing.T) {
@@ -53,7 +51,7 @@ func TestDueOrdersSeedsThenPopularityAndSkipsForgottenRelays(t *testing.T) {
 
 func TestDueForSyncOnlyReturnsSupportedRelays(t *testing.T) {
 	r := openTestRegistry(t, t.TempDir())
-	counts := map[string]int{"wss://supported.example.com": 1, "wss://unsupported.example.com": 5, "wss://later.example.com": 9, "wss://supported.example.com/vertex": 3}
+	counts := map[string]int{"wss://supported.example.com": 1, "wss://unsupported.example.com": 5, "wss://later.example.com": 9}
 	if err := r.SetPopularity(counts, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -62,9 +60,6 @@ func TestDueForSyncOnlyReturnsSupportedRelays(t *testing.T) {
 		"wss://supported.example.com":   func(relay *Relay) { relay.NIP77 = NIP77Supported },
 		"wss://unsupported.example.com": func(relay *Relay) { relay.NIP77 = NIP77Unsupported },
 		"wss://later.example.com":       func(relay *Relay) { relay.NIP77, relay.NextSyncAt = NIP77Supported, now.Add(time.Hour) },
-		"wss://supported.example.com/vertex": func(relay *Relay) {
-			relay.NIP77, relay.AliasOf = NIP77Supported, "wss://supported.example.com"
-		},
 	} {
 		if err := r.Update(url, update); err != nil {
 			t.Fatal(err)
@@ -122,49 +117,6 @@ func TestRegistrySurvivesReopening(t *testing.T) {
 	if !ok || relay.NIP77 != NIP77Supported || relay.Popularity != 2 || relay.SyncInterval != time.Hour || len(relay.SyncBoundaries) != 1 ||
 		relay.Lists != 42 || relay.ListsSource != ListsSynced || !relay.Indexer || relay.Unique != 3 {
 		t.Fatalf("expected the relay to survive reopening, got %+v", relay)
-	}
-}
-
-func TestRelaysWithAPathAreRetestedOnceForAliases(t *testing.T) {
-	path := t.TempDir()
-	r := openTestRegistry(t, path)
-	counts := map[string]int{"wss://a.example.com": 1, "wss://a.example.com/vertex": 1, "wss://a.example.com?x=1": 1, "wss://b.example.com/vertex": 1}
-	if err := r.SetPopularity(counts, []string{"wss://seed.example.com/relay"}); err != nil {
-		t.Fatal(err)
-	}
-	later := time.Now().Add(time.Hour)
-	for url, status := range map[string]NIP77Status{
-		"wss://a.example.com":          NIP77Supported,
-		"wss://a.example.com/vertex":   NIP77Supported,
-		"wss://a.example.com?x=1":      NIP77Supported,
-		"wss://seed.example.com/relay": NIP77Supported,
-		"wss://b.example.com/vertex":   NIP77Unsupported,
-	} {
-		if err := r.Update(url, func(relay *Relay) { relay.NIP77, relay.NextTestAt = status, later }); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// As if the registry predated aliases.
-	if err := r.env.Update(func(txn *lmdb.Txn) error { return txn.Del(r.settings, []byte(aliasesRetestedKey), nil) }); err != nil {
-		t.Fatal(err)
-	}
-	r.Close()
-
-	reopened := openTestRegistry(t, path)
-	var due []string
-	for _, relay := range reopened.Due(time.Now(), 10) {
-		due = append(due, relay.URL)
-	}
-	if want := []string{"wss://a.example.com/vertex", "wss://a.example.com?x=1"}; !slices.Equal(slices.Sorted(slices.Values(due)), want) {
-		t.Fatalf("expected the supported relays with a path or a query to be due, got %v", due)
-	}
-	if err := reopened.Update("wss://a.example.com/vertex", func(relay *Relay) { relay.NextTestAt = later }); err != nil {
-		t.Fatal(err)
-	}
-	reopened.Close()
-
-	if relay, _ := openTestRegistry(t, path).Get("wss://a.example.com/vertex"); relay.NextTestAt.Before(time.Now()) {
-		t.Error("expected the retest to happen only once")
 	}
 }
 

@@ -53,7 +53,6 @@ func TestIsIndexer(t *testing.T) {
 		{"big relay before the index is filled", measured(false, 90, registry.ListsSynced), 100, false, false},
 		{"big relay counted", measured(false, 50, registry.ListsCounted), 100, true, true},
 		{"empty relay and empty index", measured(false, 0, registry.ListsSynced), 0, true, false},
-		{"alias of a big relay", registry.Relay{Lists: 90, ListsSource: registry.ListsCounted, AliasOf: "wss://big.example.com"}, 100, true, false},
 	}
 	for _, test := range tests {
 		if got := isIndexer(test.relay, test.ours, test.filled, 0.5); got != test.want {
@@ -79,7 +78,6 @@ func TestLiveRelays(t *testing.T) {
 		supported("wss://nothing.example.com", false, 0, time.Time{}),
 		{URL: "wss://banned.example.com", Popularity: 1, NIP77: registry.NIP77Supported, Indexer: true, Banned: true},
 		{URL: "wss://forced.example.com", NIP77: registry.NIP77Supported, ForceLive: true},
-		{URL: "wss://indexer.example.com/vertex", Popularity: 1, NIP77: registry.NIP77Supported, Indexer: true, ForceLive: true, AliasOf: "wss://indexer.example.com"},
 	}
 
 	settings := registry.Settings{LiveCap: 2, LiveQuietPeriod: 7 * 24 * time.Hour}

@@ -91,7 +91,7 @@ func liveRelays(relays []registry.Relay, now time.Time, settings registry.Settin
 	var contributors []registry.Relay
 	for _, relay := range relays {
 		switch {
-		case relay.NIP77 != registry.NIP77Supported || relay.Banned || relay.AliasOf != "":
+		case relay.NIP77 != registry.NIP77Supported || relay.Banned:
 		case relay.ForceLive:
 			want[relay.URL] = true
 		case relay.Forgotten():

@@ -40,7 +40,10 @@ func probeNIP77(ctx context.Context, client *http.Client, url string, withCount 
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	conn, err := dial(ctx, client, url)
+	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
+		HTTPClient: client,
+		HTTPHeader: http.Header{"User-Agent": {userAgent}},
+	})
 	if errors.Is(err, errForbiddenAddress) {
 		return probeResult{status: registry.NIP77Forbidden, detail: err.Error()}
 	}
@@ -48,6 +51,7 @@ func probeNIP77(ctx context.Context, client *http.Client, url string, withCount 
 		return probeResult{status: registry.NIP77Unreachable, detail: err.Error()}
 	}
 	defer conn.CloseNow()
+	conn.SetReadLimit(probeReadLimit)
 
 	var result probeResult
 	result.status, result.detail = testNegentropy(ctx, conn)
@@ -57,69 +61,38 @@ func probeNIP77(ctx context.Context, client *http.Client, url string, withCount 
 	return result
 }
 
-func dial(ctx context.Context, client *http.Client, url string) (*websocket.Conn, error) {
-	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
-		HTTPClient: client,
-		HTTPHeader: http.Header{"User-Agent": {userAgent}},
-	})
-	if err != nil {
-		return nil, err
-	}
-	conn.SetReadLimit(probeReadLimit)
-	return conn, nil
-}
-
 func testNegentropy(ctx context.Context, conn *websocket.Conn) (registry.NIP77Status, string) {
-	if err := openSession(ctx, conn, relayListsFilter); err != nil {
+	open, err := nip77.OpenEnvelope{SubscriptionID: probeSubscription, Filter: relayListsFilter, Message: emptySetMessage()}.MarshalJSON()
+	if err != nil {
+		return registry.NIP77Unknown, err.Error()
+	}
+	if err := conn.Write(ctx, websocket.MessageText, open); err != nil {
 		return registry.NIP77Unreachable, err.Error()
 	}
-	label, content, err := sessionAnswer(ctx, conn)
-	switch {
-	case err != nil:
-		return registry.NIP77Unsupported, "no answer: " + err.Error()
-	case label == "NEG-MSG":
-		if close, err := (nip77.CloseEnvelope{SubscriptionID: probeSubscription}).MarshalJSON(); err == nil {
-			conn.Write(ctx, websocket.MessageText, close)
-		}
-		return registry.NIP77Supported, ""
-	case refused(label):
-		return registry.NIP77Supported, content
-	default:
-		return registry.NIP77Unsupported, content
-	}
-}
 
-// openSession opens a negentropy session on filter with an empty set on our side.
-func openSession(ctx context.Context, conn *websocket.Conn, filter nostr.Filter) error {
-	open, err := nip77.OpenEnvelope{SubscriptionID: probeSubscription, Filter: filter, Message: emptySetMessage()}.MarshalJSON()
-	if err != nil {
-		return err
-	}
-	return conn.Write(ctx, websocket.MessageText, open)
-}
-
-// sessionAnswer returns the label of the relay's first answer to the session, NOTICE included,
-// and the message or reason it carries.
-func sessionAnswer(ctx context.Context, conn *websocket.Conn) (label, content string, err error) {
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
-			return "", "", err
+			return registry.NIP77Unsupported, "no answer: " + err.Error()
 		}
 		label, first, second := parseMessage(data)
 		switch {
 		case label == "NOTICE":
-			return label, first, nil
+			return registry.NIP77Unsupported, first
 		case first != probeSubscription:
-		case label == "NEG-MSG", label == "CLOSED", refused(label):
-			return label, second, nil
+			continue
+		case label == "NEG-MSG":
+			if close, err := (nip77.CloseEnvelope{SubscriptionID: probeSubscription}).MarshalJSON(); err == nil {
+				conn.Write(ctx, websocket.MessageText, close)
+			}
+			return registry.NIP77Supported, ""
+		// khatru sends NEG-ERROR instead of NIP-77's NEG-ERR.
+		case label == "NEG-ERR", label == "NEG-ERROR":
+			return registry.NIP77Supported, second
+		case label == "CLOSED":
+			return registry.NIP77Unsupported, second
 		}
 	}
-}
-
-// refused tells whether label is a NEG-ERR. khatru sends NEG-ERROR instead of NIP-77's NEG-ERR.
-func refused(label string) bool {
-	return label == "NEG-ERR" || label == "NEG-ERROR"
 }
 
 // countLists asks for a NIP-45 COUNT on kind 10002 and reports false when the relay gives none.

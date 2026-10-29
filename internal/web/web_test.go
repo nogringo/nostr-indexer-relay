@@ -229,11 +229,6 @@ func TestPagesRender(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ta.Registry.Update("wss://relay000.example.com", func(r *registry.Relay) {
-		r.NIP77, r.AliasOf = registry.NIP77Supported, "wss://seed.example.com"
-	}); err != nil {
-		t.Fatal(err)
-	}
 	ta.Registry.CountStored(now)
 
 	for _, test := range []struct {
@@ -244,7 +239,6 @@ func TestPagesRender(t *testing.T) {
 		{"/admin/relays", []string{"wss://seed.example.com", "wss://relay149.example.com", "Next page", "Stop forcing live", "failed"}},
 		{"/admin/relays?status=supported&q=SEED", []string{"wss://seed.example.com", "1 relays"}},
 		{"/admin/relays?page=2", []string{"Previous page", "wss://relay000.example.com"}},
-		{"/admin/relays?status=aliases", []string{"wss://relay000.example.com", "alias of wss://seed.example.com", "1 relays"}},
 		{"/admin/settings", []string{"wss://indexer.coracle.social", "Save settings", "npub1"}},
 		{"/static/admin.js", []string{"signEvent"}},
 	} {
@@ -258,9 +252,6 @@ func TestPagesRender(t *testing.T) {
 				t.Errorf("%s: expected %q in the page", test.path, want)
 			}
 		}
-	}
-	if _, body := ta.get(t, "/admin/relays?status=aliases"); strings.Contains(body, `value="sync"`) || strings.Contains(body, `value="force-live"`) {
-		t.Error("an alias should offer neither a sync nor live")
 	}
 }
 
