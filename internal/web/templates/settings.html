@@ -1,6 +1,12 @@
 {{define "content"}}<h1>Settings</h1>
 <form class="settings" method="post" action="/admin/settings" novalidate>
 <div class="field">
+<label for="min-pow">Minimum proof of work</label>
+<p class="help" id="min-pow-help">The NIP-13 difficulty, in leading zero bits of the event id, that a list needs to be stored. Most clients publish relay lists without proof of work, so any value above 0 refuses theirs. Lists already stored are kept. 0 accepts every list.</p>
+<input id="min-pow" name="min_pow" value="{{.MinPoW}}" inputmode="numeric" aria-describedby="min-pow-help">
+{{with .MinPoWError}}<p class="error">{{.}}</p>{{end}}
+</div>
+<div class="field">
 <label class="check"><input type="checkbox" name="visitors"{{if .Visitors}} checked{{end}} aria-describedby="visitors-help"> Public search page</label>
 <p class="help" id="visitors-help">Lets anyone look up a pubkey's relay list on the home page. When it is off, the relay, NIP-11 and this admin keep working.</p>
 </div>

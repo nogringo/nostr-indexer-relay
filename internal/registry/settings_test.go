@@ -11,14 +11,14 @@ import (
 func TestSettingsStartAtTheDefaultsAndSurviveReopening(t *testing.T) {
 	path := t.TempDir()
 	r := openTestRegistry(t, path)
-	if got := r.Settings(); !got.Visitors {
+	if got := r.Settings(); !got.Visitors || got.MinPoW != 0 {
 		t.Fatalf("expected the defaults, got %+v", got)
 	}
 	if _, ok := r.Admin(); ok {
 		t.Fatal("expected no admin on a new registry")
 	}
 
-	if err := r.SetSettings(Settings{Visitors: false}); err != nil {
+	if err := r.SetSettings(Settings{Visitors: false, MinPoW: 20}); err != nil {
 		t.Fatal(err)
 	}
 	admin := nostr.Generate().Public()
@@ -29,7 +29,7 @@ func TestSettingsStartAtTheDefaultsAndSurviveReopening(t *testing.T) {
 	r.Close()
 
 	reopened := openTestRegistry(t, path)
-	if got := reopened.Settings(); got.Visitors {
+	if got := reopened.Settings(); got.Visitors || got.MinPoW != 20 {
 		t.Errorf("expected the saved settings, got %+v", got)
 	}
 	if stored, ok := reopened.Admin(); !ok || stored != admin {

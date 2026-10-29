@@ -142,6 +142,23 @@ func TestSaveSettings(t *testing.T) {
 	}
 }
 
+func TestSaveMinimumProofOfWork(t *testing.T) {
+	ta := newSignedInAdmin(t)
+
+	if status, _ := ta.postForm(t, "/admin/settings", url.Values{"min_pow": {" 20 "}}, ""); status != http.StatusSeeOther || ta.Registry.Settings().MinPoW != 20 {
+		t.Fatalf("expected the minimum to be saved, got %d %+v", status, ta.Registry.Settings())
+	}
+	for _, value := range []string{"twenty", "-1", "257", "8.5"} {
+		status, body := ta.postForm(t, "/admin/settings", url.Values{"min_pow": {value}}, "")
+		if status != http.StatusBadRequest || !strings.Contains(body, "Enter a whole number of bits") || ta.Registry.Settings().MinPoW != 20 {
+			t.Errorf("%q: expected the form to be refused and the minimum kept, got %d", value, status)
+		}
+	}
+	if status, _ := ta.postForm(t, "/admin/settings", url.Values{"min_pow": {""}}, ""); status != http.StatusSeeOther || ta.Registry.Settings().MinPoW != 0 {
+		t.Errorf("expected an empty field to require no proof of work, got %d", status)
+	}
+}
+
 func TestPagesRender(t *testing.T) {
 	ta := newSignedInAdmin(t)
 	ta.Registry.CountStored(time.Now())
@@ -151,7 +168,7 @@ func TestPagesRender(t *testing.T) {
 		want []string
 	}{
 		{"/admin", []string{"pubkeys indexed", "Show the numbers"}},
-		{"/admin/settings", []string{"Public search page", "checked", "Save settings", "npub1"}},
+		{"/admin/settings", []string{"Minimum proof of work", `value="0"`, "Public search page", "checked", "Save settings", "npub1"}},
 		{"/static/admin.js", []string{"signEvent"}},
 	} {
 		status, body := ta.get(t, test.path)

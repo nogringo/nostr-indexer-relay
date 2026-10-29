@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"fmt"
 	"iter"
 	"net/http"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"fiatjaf.com/nostr/eventstore"
 	"fiatjaf.com/nostr/khatru"
 	"fiatjaf.com/nostr/nip11"
+	"fiatjaf.com/nostr/nip13"
 
 	"nostr-indexer-relay/internal/scan"
 )
@@ -41,14 +43,19 @@ func New(cfg Config, store eventstore.Store) *khatru.Relay {
 		RestrictedWrites: true,
 	}
 	// 42 and 70 come from khatru: they let authors publish protected lists themselves.
-	relay.Info.SupportedNIPs = []any{1, 11, 40, 42, 45, 65, 70, 77}
+	relay.Info.SupportedNIPs = []any{1, 11, 13, 40, 42, 45, 65, 70, 77}
 	// khatru advertises NIP-09 whenever DeleteEvent is set, but kind 5 is rejected here.
 	relay.OverwriteRelayInformation = func(_ context.Context, _ *http.Request, info nip11.RelayInformationDocument) nip11.RelayInformationDocument {
 		info.SupportedNIPs = slices.DeleteFunc(slices.Clone(info.SupportedNIPs), func(nip any) bool { return nip == 9 })
+		if cfg.MinPoW != nil {
+			limitation := *info.Limitation
+			limitation.MinPowDifficulty = cfg.MinPoW()
+			info.Limitation = &limitation
+		}
 		return info
 	}
 
-	relay.OnEvent = acceptOnlyRelayLists
+	relay.OnEvent = acceptRelayLists(cfg.MinPoW)
 	relay.UseEventstore(store, cfg.MaxLimit)
 	reportOlderListsAsDuplicates(relay, store)
 	serveFullNegentropySessions(relay, store, cmp.Or(cfg.NegentropyLimit, defaultNegentropyLimit))
@@ -96,11 +103,20 @@ func serveFullNegentropySessions(relay *khatru.Relay, store eventstore.Store, li
 	}
 }
 
-func acceptOnlyRelayLists(_ context.Context, event nostr.Event) (bool, string) {
-	if event.Kind != nostr.KindRelayListMetadata {
-		return true, "blocked: only kind 10002 relay lists are accepted"
+func acceptRelayLists(minPoW func() int) func(context.Context, nostr.Event) (bool, string) {
+	return func(_ context.Context, event nostr.Event) (bool, string) {
+		if event.Kind != nostr.KindRelayListMetadata {
+			return true, "blocked: only kind 10002 relay lists are accepted"
+		}
+		if minPoW == nil {
+			return false, ""
+		}
+		// The committed target counts, as NIP-13 advises, so that a list aimed lower that got lucky is refused.
+		if min, work := minPoW(), nip13.CommittedDifficulty(event); work < min {
+			return true, fmt.Sprintf("pow: difficulty %d is less than %d", work, min)
+		}
+		return false, ""
 	}
-	return false, ""
 }
 
 //go:embed version.txt

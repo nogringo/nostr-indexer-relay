@@ -35,6 +35,8 @@ type Config struct {
 	MaxLimit    int
 	// Largest negentropy session served; 0 means defaultNegentropyLimit.
 	NegentropyLimit int
+	// Minimum NIP-13 difficulty of a stored list, read for each event; nil requires none.
+	MinPoW func() int
 }
 
 func LoadConfig() (Config, error) {

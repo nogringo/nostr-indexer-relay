@@ -15,13 +15,14 @@ This project is a relay that stores only relay lists, the ones published to it, 
 - No event is ever served unless its id and signature were verified.
 - `created_at` is not checked.
 - A stored event is at most 128 KB, the max message size. Its content is at most 64 KB, a limit of the LMDB storage format.
+- The admin can require a minimum proof of work (NIP-13), 0 by default. A list below it is refused with `pow: difficulty X is less than Y`. The committed target of the `nonce` tag counts, as NIP-13 advises: a list aimed lower that reached the minimum by luck is refused, and so is a list without a target. The minimum is read for each event, so a change applies right away, and lists already stored are kept.
 
 Out of scope, by decision:
 
 - Kind 10050 (NIP-17 DM relays).
 - Fetching an unknown pubkey on demand when a client asks for it.
 - Deletion requests (NIP-09) and requests to vanish (NIP-62). A user changes their list by publishing a newer one.
-- Anti-spam (web of trust, proof of work, per-pubkey limits).
+- Anti-spam beyond the minimum proof of work (web of trust, per-pubkey limits).
 - Crawling other relays. The relay stores only the lists published to it. The crawler (discovery, NIP-77 sync, live subscriptions, indexer detection) was removed on 2026-10-29.
 
 ## Serving
@@ -30,6 +31,7 @@ Out of scope, by decision:
 | --- | --- |
 | 1 | Base protocol. |
 | 11 | Relay information document. |
+| 13 | Minimum proof of work set by the admin, advertised in NIP-11 as `min_pow_difficulty`. |
 | 40 | Handled by khatru: a list with an `expiration` tag is deleted when it expires. |
 | 42, 70 | Handled by khatru, so that authors can publish protected (`-` tagged) lists themselves. |
 | 45 | `COUNT`, so that other instances can tell this relay is an indexer. |
@@ -52,7 +54,7 @@ Pages are rendered on the server, with a single script for NIP-07 signing. They 
 ### Admin (`/admin`)
 
 - Dashboard: indexed pubkeys, new or updated 10002 stored per day (UTC, last 30 days).
-- Settings: the switch for the visitor interface. Settings are stored in the database, so nothing has to be configured through files.
+- Settings: the minimum proof of work, from 0 to 256 bits (an empty field means 0), and the switch for the visitor interface. Settings are stored in the database, so nothing has to be configured through files.
 
 ### Visitors (`/`, can be turned off)
 

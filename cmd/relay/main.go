@@ -46,6 +46,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	cfg.MinPoW = func() int { return state.Settings().MinPoW }
 	relay := indexer.New(cfg, store)
 	relay.OnEventSaved = func(context.Context, nostr.Event) { state.CountStored(time.Now()) }
 

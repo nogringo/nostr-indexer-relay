@@ -3,11 +3,13 @@ package web
 import (
 	"bytes"
 	"embed"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -132,28 +134,55 @@ func (s *Site) overview(w http.ResponseWriter, r *http.Request) {
 
 type settingsData struct {
 	page
-	registry.Settings
+	Visitors     bool
+	MinPoW       string
+	MinPoWError  string
 	Admin        string
 	AdminFromEnv bool
 }
 
 func (s *Site) settings(w http.ResponseWriter, r *http.Request) {
-	data := settingsData{page: s.page("Settings", "settings"), Settings: s.Registry.Settings(), AdminFromEnv: s.AdminPubKey != nil}
-	if admin, ok := s.admin(); ok {
-		data.Admin = nip19.EncodeNpub(admin)
-	}
-	s.render(w, http.StatusOK, "settings", data)
+	settings := s.Registry.Settings()
+	s.renderSettings(w, http.StatusOK, settingsData{Visitors: settings.Visitors, MinPoW: strconv.Itoa(settings.MinPoW)})
 }
 
 func (s *Site) saveSettings(w http.ResponseWriter, r *http.Request) {
+	form := settingsData{Visitors: r.PostFormValue("visitors") != "", MinPoW: strings.TrimSpace(r.PostFormValue("min_pow"))}
+	minPoW, ok := parseMinPoW(form.MinPoW)
+	if !ok {
+		form.MinPoWError = fmt.Sprintf("Enter a whole number of bits, from 0 to %d.", eventIDBits)
+		s.renderSettings(w, http.StatusBadRequest, form)
+		return
+	}
 	settings := s.Registry.Settings()
-	settings.Visitors = r.PostFormValue("visitors") != ""
+	settings.Visitors = form.Visitors
+	settings.MinPoW = minPoW
 	if err := s.Registry.SetSettings(settings); err != nil {
 		http.Error(w, "failed to save the settings: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.Log.Printf("admin: settings changed")
 	http.Redirect(w, r, "/admin/settings", http.StatusSeeOther)
+}
+
+func (s *Site) renderSettings(w http.ResponseWriter, status int, data settingsData) {
+	data.page = s.page("Settings", "settings")
+	data.AdminFromEnv = s.AdminPubKey != nil
+	if admin, ok := s.admin(); ok {
+		data.Admin = nip19.EncodeNpub(admin)
+	}
+	s.render(w, status, "settings", data)
+}
+
+const eventIDBits = 256
+
+// An empty field requires no proof of work.
+func parseMinPoW(value string) (int, bool) {
+	if value == "" {
+		return 0, true
+	}
+	bits, err := strconv.Atoi(value)
+	return bits, err == nil && bits >= 0 && bits <= eventIDBits
 }
 
 func number(n int) string {

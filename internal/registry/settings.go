@@ -13,6 +13,8 @@ import (
 type Settings struct {
 	// Whether the public search page is served.
 	Visitors bool `json:"visitors"`
+	// Minimum NIP-13 difficulty, in bits, of a list to be stored. 0 requires none.
+	MinPoW int `json:"min_pow"`
 }
 
 func DefaultSettings() Settings {

@@ -12,6 +12,7 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/eventstore/lmdb"
 	"fiatjaf.com/nostr/nip11"
+	"fiatjaf.com/nostr/nip13"
 	"fiatjaf.com/nostr/nip77"
 	"fiatjaf.com/nostr/nip77/negentropy"
 	"fiatjaf.com/nostr/nip77/negentropy/storage/vector"
@@ -83,6 +84,58 @@ func TestRelayReportsOlderAndKnownListsAsDuplicates(t *testing.T) {
 	}
 }
 
+func TestRelayRequiresTheMinimumProofOfWork(t *testing.T) {
+	minPoW := 0
+	cfg := testConfig()
+	cfg.MinPoW = func() int { return minPoW }
+	relay := New(cfg, newTestStore(t))
+	ctx := context.Background()
+
+	if _, err := relay.AddEvent(ctx, relayList(t, nostr.Generate(), nostr.Now(), "wss://relay.example.com")); err != nil {
+		t.Fatalf("expected a list without proof of work to be accepted at 0: %v", err)
+	}
+
+	minPoW = 8
+	_, err := relay.AddEvent(ctx, relayList(t, nostr.Generate(), nostr.Now(), "wss://relay.example.com"))
+	if err == nil || !strings.HasPrefix(err.Error(), "pow: ") {
+		t.Fatalf("expected a list without proof of work to be refused, got %v", err)
+	}
+	if _, err := relay.AddEvent(ctx, minedRelayList(t, nostr.Generate(), 8)); err != nil {
+		t.Fatalf("expected a list with enough proof of work to be accepted: %v", err)
+	}
+
+	// Aimed at 4, it reaches 8 by luck: the committed target is what counts.
+	lucky := minedRelayList(t, nostr.Generate(), 4)
+	for nip13.Difficulty(lucky.ID) < 8 {
+		lucky = minedRelayList(t, nostr.Generate(), 4)
+	}
+	if _, err := relay.AddEvent(ctx, lucky); err == nil {
+		t.Fatal("expected a list aimed below the minimum to be refused")
+	}
+}
+
+func TestRelayInformationAdvertisesTheMinimumProofOfWork(t *testing.T) {
+	cfg := testConfig()
+	cfg.MinPoW = func() int { return 12 }
+	relay := New(cfg, newTestStore(t))
+
+	request := httptest.NewRequest("GET", "/", nil)
+	request.Header.Set("Accept", "application/nostr+json")
+	response := httptest.NewRecorder()
+	relay.ServeHTTP(response, request)
+
+	var info nip11.RelayInformationDocument
+	if err := json.NewDecoder(response.Body).Decode(&info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Limitation == nil || info.Limitation.MinPowDifficulty != 12 {
+		t.Fatalf("expected min_pow_difficulty 12, got %+v", info.Limitation)
+	}
+	if relay.Info.Limitation.MinPowDifficulty != 0 {
+		t.Error("expected the shared relay information to stay untouched")
+	}
+}
+
 func TestRelayServesLargeAuthorsFilter(t *testing.T) {
 	relay := New(testConfig(), newTestStore(t))
 	ctx := context.Background()
@@ -123,7 +176,7 @@ func TestRelayInformationListsOnlySupportedNIPs(t *testing.T) {
 		nips = append(nips, int(nip.(float64)))
 	}
 	slices.Sort(nips)
-	if want := []int{1, 11, 40, 42, 45, 65, 70, 77}; !slices.Equal(nips, want) {
+	if want := []int{1, 11, 13, 40, 42, 45, 65, 70, 77}; !slices.Equal(nips, want) {
 		t.Fatalf("expected supported NIPs %v, got %v", want, nips)
 	}
 }
@@ -222,6 +275,20 @@ func relayList(t *testing.T, sk nostr.SecretKey, createdAt nostr.Timestamp, rela
 		tags = append(tags, nostr.Tag{"r", url})
 	}
 	return signedEvent(t, sk, nostr.KindRelayListMetadata, createdAt, tags)
+}
+
+func minedRelayList(t *testing.T, sk nostr.SecretKey, difficulty int) nostr.Event {
+	t.Helper()
+	event := nostr.Event{PubKey: sk.Public(), CreatedAt: nostr.Now(), Kind: nostr.KindRelayListMetadata, Tags: nostr.Tags{{"r", "wss://relay.example.com"}}}
+	nonce, err := nip13.DoWork(context.Background(), event, difficulty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event.Tags = append(event.Tags, nonce)
+	if err := event.Sign(sk); err != nil {
+		t.Fatal(err)
+	}
+	return event
 }
 
 func signedEvent(t *testing.T, sk nostr.SecretKey, kind nostr.Kind, createdAt nostr.Timestamp, tags nostr.Tags) nostr.Event {
