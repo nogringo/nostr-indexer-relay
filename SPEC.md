@@ -171,8 +171,6 @@ When the admin turns the visitor interface off, the relay, NIP-11 and the admin 
 
 The `created_at` and id of every stored list are also kept in memory, ordered as negentropy wants them: about 40 bytes per list, 100 MB for 2.5 million lists. One read of the whole index builds them at startup, and every write, replacement and expiration updates them. Negentropy sessions, ours and those served to peers, and counts by date are answered from memory. Reading the lists from LMDB for each session decoded every one of them: on 2.5 million lists, about 3 GB allocated at each visit of each relay, which kept both cores of a small VPS busy.
 
-The backend does not expose `MDB_NORDAHEAD`, so on Linux the relay does what that flag does: it advises the kernel that the events map is read at random (`MADV_RANDOM`). Otherwise each page fault also reads the pages around it, which evicts from a full page cache the pages that the next lookups need. On 2026-10-27, with a 1.3 GB database and 1.1 GB of page cache on a VPS shared with other services, the kernel read 1.5 GB/s from disk, the relay spent 84 % of its CPU time in the kernel, and the crawler stored 33 lists per second. On a 700 MB copy in a container limited to 256 MB, a lookup by author read 119 KB from disk with readahead and 4 KB without.
-
 The LMDB backend allocates for the whole limit of a query up front, so every full read of the stored lists (the startup index, discovery, peer sessions on other filters) goes through a paged scan, 5000 events at a time. When more than 5000 lists share one `created_at`, the rest of that second is skipped. Discovery parses each distinct relay URL once per scan.
 
 Negentropy sessions served to peers:
